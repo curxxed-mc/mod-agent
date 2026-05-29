@@ -1,5 +1,7 @@
 package net.curxxed.dev.agent.transformer;
 
+import net.curxxed.dev.agent.AgentLog;
+import net.curxxed.dev.agent.enums.Environment;
 import net.curxxed.dev.agent.mappings.MappingRegistry;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
@@ -7,8 +9,7 @@ import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.commons.ClassRemapper;
 import org.objectweb.asm.commons.Remapper;
-
-import java.io.InputStream;
+import java.io.*;
 import java.lang.instrument.ClassFileTransformer;
 import java.security.ProtectionDomain;
 import java.util.HashSet;
@@ -17,6 +18,7 @@ import java.util.function.Supplier;
 
 // Translates mod bytecode from any known mapping namespace (obf, SRG, MCP)
 // into the namespace used by the current runtime.
+// TODO: Remap enums properly (refer to Meowtils HookItemRenderer)
 public class RuntimeRemapper implements ClassFileTransformer {
 
     private final MappingRegistry mappings;
@@ -29,10 +31,7 @@ public class RuntimeRemapper implements ClassFileTransformer {
         this.modClassNames = modClassNames;
         this.mappings = mappings;
         this.environmentSupplier = environmentSupplier;
-        System.out.println("[Mod-Agent] RuntimeRemapper ready: "
-                + mappings.classCount() + " classes, "
-                + mappings.methodCount() + " methods, "
-                + mappings.fieldCount() + " fields.");
+        AgentLog.log("RuntimeRemapper ready: " + mappings.classCount() + " classes, " + mappings.methodCount() + " methods, " + mappings.fieldCount() + " fields.");
     }
 
     @Override
@@ -44,7 +43,7 @@ public class RuntimeRemapper implements ClassFileTransformer {
         byte[] remapped = remapBytes(classfileBuffer, mappings, environment, modClassNames, loader);
         if (remapped == classfileBuffer) return null;
 
-        System.out.println("[Mod-Agent] Remapped " + className + " -> " + environment + " runtime names");
+        AgentLog.log("Remapped " + className + " to " + environment + " runtime names");
         return remapped;
     }
 
@@ -90,6 +89,7 @@ public class RuntimeRemapper implements ClassFileTransformer {
         @Override
         public String map(String internalName) {
             if (internalName == null || protectedClassNames.contains(internalName)) return internalName;
+            if (internalName.startsWith("java/") || internalName.startsWith("javax/") || internalName.startsWith("jdk/") || internalName.startsWith("sun/") || internalName.startsWith("com/sun/")) return internalName;
             String mapped = mappings.mapClass(internalName, targetNamespace);
             if (!mapped.equals(internalName)) changed = true;
             return mapped;
@@ -97,6 +97,8 @@ public class RuntimeRemapper implements ClassFileTransformer {
 
         @Override
         public String mapMethodName(String owner, String name, String descriptor) {
+            //if (protectedClassNames.contains(owner)) return name; // TODO: This breaks certain remaps?
+            if (owner.startsWith("java/") || owner.startsWith("javax/") || owner.startsWith("jdk/") || owner.startsWith("sun/") || owner.startsWith("com/sun/")) return name;
             seedSuperClassChain(owner);
             String mapped = mappings.mapMethodName(owner, name, descriptor, targetNamespace);
             if (!mapped.equals(name)) changed = true;
@@ -105,6 +107,8 @@ public class RuntimeRemapper implements ClassFileTransformer {
 
         @Override
         public String mapFieldName(String owner, String name, String descriptor) {
+            if (protectedClassNames.contains(owner)) return name;
+            if (owner.startsWith("java/") || owner.startsWith("javax/") || owner.startsWith("jdk/") || owner.startsWith("sun/") || owner.startsWith("com/sun/")) return name;
             seedSuperClassChain(owner);
             String mapped = mappings.mapFieldName(owner, name, descriptor, targetNamespace);
             if (!mapped.equals(name)) changed = true;
@@ -157,9 +161,20 @@ public class RuntimeRemapper implements ClassFileTransformer {
                 InputStream is = loader != null ? loader.getResourceAsStream(resource) : null;
                 if (is == null) is = ClassLoader.getSystemResourceAsStream(resource);
                 if (is == null) return null;
-                try (InputStream in = is) {
-                    return in.readAllBytes();
+
+                try (InputStream in = is;
+                     ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+
+                    byte[] buffer = new byte[4096];
+                    int len;
+
+                    while ((len = in.read(buffer)) != -1) {
+                        out.write(buffer, 0, len);
+                    }
+
+                    return out.toByteArray();
                 }
+
             } catch (Exception ignored) {
                 return null;
             }

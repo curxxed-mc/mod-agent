@@ -1,14 +1,15 @@
-package net.curxxed.dev.agent.transformer;
+package net.curxxed.dev.agent.enums;
 
+import net.curxxed.dev.agent.AgentLog;
 import net.curxxed.dev.agent.mappings.MappingRegistry;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
-
 import java.io.InputStream;
 
 public enum Environment {
+
     OBF(MappingRegistry.Namespace.OBF),
     SRG(MappingRegistry.Namespace.SRG),
     MCP(MappingRegistry.Namespace.MCP);
@@ -26,7 +27,7 @@ public enum Environment {
     public static Environment detectRuntimeEnvironment() {
         Environment environment = detectFromResources();
         if (environment == null) environment = MCP;
-        System.out.println("[Mod-Agent] Detected initial mapping environment: " + environment);
+        AgentLog.log("Detected initial mapping environment: " + environment);
         return environment;
     }
 
@@ -37,7 +38,7 @@ public enum Environment {
         final boolean[] hasSrgStartGame = {false};
         final boolean[] hasMcpStartGame = {false};
         try {
-            ClassReader cr = new ClassReader(classfileBuffer);
+            final ClassReader cr = new ClassReader(classfileBuffer);
             cr.accept(new ClassVisitor(Opcodes.ASM9) {
                 @Override
                 public MethodVisitor visitMethod(int access, String name, String descriptor,
@@ -59,21 +60,21 @@ public enum Environment {
     }
 
     private static Environment detectFromResources() {
-    ClassLoader contextLoader = Thread.currentThread().getContextClassLoader();
-    if (hasResource(contextLoader, "ave.class")) return OBF;
-    if (hasResource(contextLoader, "net/minecraft/client/Minecraft.class")) {
-        boolean isLunar = hasResource(contextLoader, "com/moonsworth/lunar/genesis/Genesis.class");
-    if (hasResource(contextLoader, "net/minecraftforge/common/MinecraftForge.class") && !isLunar) {
-           return SRG;
+        final ClassLoader contextLoader = Thread.currentThread().getContextClassLoader();
+        if (hasResource(contextLoader, "ave.class")) return OBF;
+        if (hasResource(contextLoader, "net/minecraft/client/Minecraft.class")) {
+            boolean isLunar = hasResource(contextLoader, "com/moonsworth/lunar/genesis/Genesis.class");
+            if (hasResource(contextLoader, "net/minecraftforge/common/MinecraftForge.class") && !isLunar) {
+                return SRG;
+            }
+            return MCP;
         }
-        return MCP;
+        return null;
     }
-    return null;
-}
 
     private static boolean hasResource(ClassLoader loader, String name) {
         try {
-            InputStream stream = loader != null
+            final InputStream stream = loader != null
                     ? loader.getResourceAsStream(name)
                     : ClassLoader.getSystemResourceAsStream(name);
             if (stream == null) return false;

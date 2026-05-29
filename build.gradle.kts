@@ -7,8 +7,8 @@ group = "net.curxxed.dev"
 version = "1.0.0"
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
 }
 
 repositories {
@@ -25,7 +25,8 @@ dependencies {
 
 tasks.shadowJar {
     archiveClassifier.set("")
-    archiveFileName.set("lunar-agent-${project.version}.jar")
+    //archiveFileName.set("lunar-agent-${project.version}.jar")
+    archiveFileName.set("lunar-agent.jar") // TODO: Add version tag after testing is done ig (and rename to mod-agent)
 
     // relocate so we don't collide with whatever ASM version lunar/ichor ships with
     relocate("org.objectweb.asm", "net.curxxed.dev.agent.asm")

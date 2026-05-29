@@ -1,10 +1,10 @@
 {
   "required": false,
   "minVersion": "0.8",
-  "package": "net.curxxed.dev.agent.transformer",
+  "package": "net.curxxed.dev.agent.mixin",
   "compatibilityLevel": "JAVA_8",
   "client": [
-    "AgentMixinBootstrap"
+    "MinecraftMixin"
   ],
   "injectors": {
     "defaultRequire": 1
