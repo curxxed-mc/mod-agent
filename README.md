@@ -3,9 +3,9 @@
 > **This project is not a user-friendly tool. It is a low-level JVM instrumentation framework that requires deep knowledge of Minecraft, Mixin, and Lunar/Badlion client internals.**
 > Incorrect use can corrupt game files, cause undiagnosable crashes, or permanently break other mods. No support will be provided for misconfigured setups.
 
-> **Note:** Lunar Client now supports adding 1.8.9 mods directly on **Lunar + Forge**, which makes this agent redundant for Forge mods on Lunar; use Lunar's built-in support for those. The agent is still needed for Badlion Client and for non-Forge (ASM or Mixin) mods on plain Lunar.
-
 ---
+
+> **Note:** Lunar Client now supports adding 1.8.9 Forge mods directly on **Lunar + Forge**. Loading Forge mods through this agent on Lunar + Forge is redundant and no longer needed: add them through Lunar instead. The agent is still for Badlion Client, vanilla 1.8.9, and non-Forge (ASM, Mixin or entrypoint) mods on Lunar.
 
 A Java agent that injects mods into Lunar Client and Badlion Client 1.8.9 at runtime, bypassing the clients' own mod discovery entirely. It also works on vanilla 1.8.9. Includes automatic obf/SRG/MCP remapping from `combined.csv`, mixin annotation patching, direct `Minecraft.startGame` bootstrapping, and bake cache invalidation. It is pure Java: no native libraries.
 
@@ -16,7 +16,7 @@ You drop a mod JAR in. It works. That's the goal.
 | Client | How the agent is loaded | Forge `@Mod` | Mixin | ASM transformer | Static entrypoint |
 |---|---|---|---|---|---|
 | Lunar Client | JVM argument in Lunar's settings | no (no Forge classes) | yes | yes | yes |
-| Lunar Client + Forge module | JVM argument in Lunar's settings | yes | yes | yes | yes |
+| Lunar Client + Forge module | JVM argument in Lunar's settings (non-Forge mods only) | not needed: add them through Lunar | yes | yes | yes |
 | Badlion Client (launched from Lunar) | `setup-badlion` launcher | no | no | yes | yes |
 | Vanilla 1.8.9 | JVM argument in your launcher | no | no | yes | yes |
 
@@ -24,9 +24,11 @@ Badlion has neither Forge nor Mixin, so mods targeting it use an [ASM transforme
 
 ---
 
-## Important: Forge mod compatibility
+## Important: Forge mods
 
-Vanilla Lunar Client does not ship any Forge classes. Forge mods will only work when running the **Lunar Client + Forge module**, which provides FML and the Forge event bus. Attempting to inject a Forge mod into plain Lunar Client will fail at class resolution.
+Lunar Client + Forge now loads 1.8.9 Forge mods itself, so you don't need this agent (or any workaround) for them: add Forge mods through Lunar.
+
+Plain Lunar Client does not ship any Forge classes, so a Forge mod injected there fails at class resolution. The agent's Forge `@Mod` support below is kept for existing setups only.
 
 ---
 
@@ -100,7 +102,7 @@ Create `agent-mods.json` anywhere on your system. It holds a `mods` array with o
 
 Pick the style your mod is built for. They can be combined; for example, `asm` + `entrypoint` is the usual setup for Badlion.
 
-**1. Forge `@Mod` (default).** With no `entrypoint`, the agent scans the JAR for classes annotated with `@Mod`, creates them with their no-argument constructor once `Minecraft.startGame` finishes, and calls their `@EventHandler` methods for `FMLPreInitializationEvent`, `FMLInitializationEvent` and `FMLPostInitializationEvent`, in that order. The mod needs Forge classes at runtime, so this only works on the Lunar Client + Forge module.
+**1. Forge `@Mod` (default).** With no `entrypoint`, the agent scans the JAR for classes annotated with `@Mod`, creates them with their no-argument constructor once `Minecraft.startGame` finishes, and calls their `@EventHandler` methods for `FMLPreInitializationEvent`, `FMLInitializationEvent` and `FMLPostInitializationEvent`, in that order. The mod needs Forge classes at runtime, so this only works on the Lunar Client + Forge module, where Lunar now loads Forge mods itself. Prefer Lunar's built-in support; this style is only kept for existing setups.
 
 ```json
 { "jar": "your-forge-mod.jar", "property": "yourmod.agent.injected" }
@@ -230,7 +232,7 @@ You do not need to do any of the following in your mod source:
 
 **Mod init fails with NPE on field access** — `Unsafe.allocateInstance` bypasses the constructor. Move all field initialisation into `init()`.
 
-**Forge mod classes not found on vanilla Lunar** — Vanilla Lunar Client does not ship Forge classes. Forge mods only work with the Lunar Client + Forge module. Use standalone mods that don't depend on Forge.
+**Forge mod classes not found on vanilla Lunar** — Plain Lunar Client does not ship Forge classes. Run the Lunar Client + Forge module and add the mod through Lunar itself (no agent needed), or use a standalone mod that doesn't depend on Forge.
 
 **Works on Lunar but breaks on vanilla Forge** — Make sure `remapJar` is what you're dropping into the Forge mods folder, not `shadowJar`. The `shadowJar` output has MCP names; Forge expects SRG names.
 
