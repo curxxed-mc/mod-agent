@@ -3,6 +3,8 @@
 > **This project is not a user-friendly tool. It is a low-level JVM instrumentation framework that requires deep knowledge of Minecraft, Mixin, and Lunar/Badlion client internals.**
 > Incorrect use can corrupt game files, cause undiagnosable crashes, or permanently break other mods. No support will be provided for misconfigured setups.
 
+> **Note:** Lunar Client now supports adding 1.8.9 mods directly on **Lunar + Forge**, which makes this agent redundant for Forge mods on Lunar; use Lunar's built-in support for those. The agent is still needed for Badlion Client and for non-Forge (ASM or Mixin) mods on plain Lunar.
+
 ---
 
 A Java agent that injects mods into Lunar Client and Badlion Client 1.8.9 at runtime, bypassing the clients' own mod discovery entirely. It also works on vanilla 1.8.9. Includes automatic obf/SRG/MCP remapping from `combined.csv`, mixin annotation patching, direct `Minecraft.startGame` bootstrapping, and bake cache invalidation. It is pure Java: no native libraries.
