@@ -1,0 +1,18 @@
+# Build output and IDE
+build/
+.gradle/
+.idea/
+out/
+*.iml
+
+# Personal configuration backups (contain absolute local paths)
+agent-mods.json.*
+lunar-jvm-args.txt
+
+# Local diagnostics, notes and legacy wrappers
+BADLION-DIAGNOSTIC.md
+LOCAL-BADLION-LAUNCH.md
+PORTABLE-BADLION.md
+badlion-java/
+vanilla-java-wrapper.py
+*.log

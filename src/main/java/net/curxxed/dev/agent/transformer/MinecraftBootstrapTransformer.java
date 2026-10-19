@@ -30,6 +30,7 @@ public class MinecraftBootstrapTransformer implements ClassFileTransformer {
     public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined,
                             ProtectionDomain domain, byte[] classfileBuffer) {
         if (className == null) return null;
+        if (net.curxxed.dev.agent.BadlionTickProbe.isProbeRetransformation(classBeingRedefined)) return null;
         if (!"ave".equals(className) && !MCP_MINECRAFT.equals(className)) return null;
 
         Environment environment = Environment.detectFromMinecraftClass(className, classfileBuffer);

@@ -11,6 +11,17 @@ java {
     targetCompatibility = JavaVersion.VERSION_1_8
 }
 
+val diagnostic by sourceSets.creating
+
+val diagnosticJar by tasks.registering(Jar::class) {
+    dependsOn(tasks.named(diagnostic.classesTaskName))
+    from(diagnostic.output)
+    archiveFileName.set("mod-agent-diagnostic.jar")
+    manifest {
+        attributes("Premain-Class" to "net.curxxed.dev.agent.diagnostic.DiagnosticAgent")
+    }
+}
+
 repositories {
     mavenCentral()
     maven("https://repo.spongepowered.org/maven/")
@@ -26,7 +37,7 @@ dependencies {
 tasks.shadowJar {
     archiveClassifier.set("")
     //archiveFileName.set("lunar-agent-${project.version}.jar")
-    archiveFileName.set("lunar-agent.jar") // TODO: Add version tag after testing is done ig (and rename to mod-agent)
+    archiveFileName.set(providers.gradleProperty("agentJarName").orElse("lunar-agent.jar"))
 
     // relocate so we don't collide with whatever ASM version lunar/ichor ships with
     relocate("org.objectweb.asm", "net.curxxed.dev.agent.asm")
@@ -35,6 +46,7 @@ tasks.shadowJar {
         attributes(
             "Premain-Class"           to "net.curxxed.dev.agent.AgentBootstrap",
             "Agent-Class"             to "net.curxxed.dev.agent.AgentBootstrap",
+            "Main-Class"              to "net.curxxed.dev.agent.AgentLauncher",
             "Can-Retransform-Classes" to "true",
             "Can-Redefine-Classes"    to "true"
         )

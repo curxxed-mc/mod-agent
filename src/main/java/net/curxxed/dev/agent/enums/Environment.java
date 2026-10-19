@@ -55,7 +55,6 @@ public enum Environment {
         }
 
         if (hasSrgStartGame[0]) return SRG;
-        if (hasMcpStartGame[0]) return MCP;
         return MCP;
     }
 

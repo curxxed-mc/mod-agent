@@ -39,6 +39,21 @@ public class AgentBootstrap {
     private static final List<JarFile> SYSTEM_LOADER_JARS = new CopyOnWriteArrayList<>();
 
     public static void premain(String args, Instrumentation inst) throws Exception {
+        // A child-scoped JAVA_TOOL_OPTIONS agent and the launcher's own JVM field
+        // can both request this JAR. Never register the same pipeline twice.
+        if (args != null && !args.isEmpty()) {
+            synchronized (AgentBootstrap.class) {
+                if (Boolean.getBoolean("modagent.premain.initialized")) {
+                    AgentLog.log("Duplicate agent invocation ignored; the existing pipeline is retained.");
+                    return;
+                }
+                System.setProperty("modagent.premain.initialized", "true");
+            }
+        }
+        if (Boolean.getBoolean("modagent.badlion.inspectOnly")) {
+            BadlionCompatibilityInspection.start(inst);
+            return;
+        }
         try {
             Path cacheDir = Paths.get(System.getProperty("user.home"), ".lunarclient", "offline", "multiver", "cache");
             if (Files.exists(cacheDir)) {
@@ -83,9 +98,6 @@ public class AgentBootstrap {
             }
         }
 
-        // Only forge mods (those with @Mod) are added to the mod list — forgeless mods
-        // (OptiFine-only etc.) only need their JARs on the classpath and their mixins
-        // registered; they don't go through lifecycle initialization.
         String serialized = buildModListProperty(mods);
         if (!serialized.isEmpty()) {
             AgentLog.log("Setting MOD_LIST_PROPERTY = " + serialized);
@@ -109,48 +121,41 @@ public class AgentBootstrap {
 
         Set<String> modClassNames = collectModClassNames(mods);
         AgentLog.log("Tracking " + modClassNames.size() + " mod classes for transformation.");
-
-        // Load combined mappings once and share them with RuntimeRemapper, mixin pre-patching,
-        // and the direct Minecraft bootstrap transformer.
         MappingRegistry mappings = loadMappings();
         AtomicReference<Environment> runtimeEnvironment =
                 new AtomicReference<>(Environment.detectRuntimeEnvironment());
-
-        // Scan every mod JAR right now at premain time to build the accessor rename map.
-        // This must happen before any mod classes are loaded so AccessorConflictPatcher
-        // has the full map ready the moment IchorClassLoader asks for the first class.
         Map<String, String> accessorRenames = buildAccessorRenameMap(mods);
         AgentLog.log("Accessor renames planned: " + accessorRenames.size());
-
         inst.addTransformer(new MinecraftBootstrapTransformer(mappings, runtimeEnvironment), true);
         inst.addTransformer(new MixinAnnotationPatcher(modClassNames, mappings, runtimeEnvironment::get), true);
-        inst.addTransformer(new RuntimeRemapper(modClassNames, mappings, runtimeEnvironment::get), true);
+        Set<String> remapLoaders = new HashSet<>();
+        for (ModEntry mod : mods) {
+            if (mod.getRemapLoaders() == null) continue;
+            for (String name : mod.getRemapLoaders().split(",")) {
+                if (!name.trim().isEmpty()) remapLoaders.add(name.trim());
+            }
+        }
+        inst.addTransformer(new RuntimeRemapper(modClassNames, mappings, runtimeEnvironment::get, remapLoaders), true);
         inst.addTransformer(new EventConstructorPatcher(modClassNames), true);
         inst.addTransformer(new AccessorConflictPatcher(modClassNames, accessorRenames), true);
         AgentLog.log("Transformers registered.");
-
-        final Set<String> appendedAsmJars = new HashSet<>();
 
         for (ModEntry mod : mods) {
             if (mod.getAsm() == null || mod.getAsm().isEmpty()) {
                 continue;
             }
-
-            File modJar = new File(mod.getJar()).getAbsoluteFile();
-
-            try {
-
-                if (appendedAsmJars.add(modJar.getCanonicalPath())) {
-                    appendToSystemClassLoader(inst, modJar);
-                }
-
-                registerAsm(inst, mod);
-            } catch (IOException e) {
-                AgentLog.log("Failed to prepare ASM transformer " + mod.getAsm() + " from " + modJar + " - " + e);
-                e.printStackTrace();
-            }
+            registerAsm(inst, mod, mappings, runtimeEnvironment, modClassNames);
         }
 
+        BadlionFinalStage.setInstrumentation(inst);
+        BadlionFinalStage.install();
+        BadlionBootstrapFallback.start(inst, mappings, runtimeEnvironment);
+
+        Thread mixinRegistrar = createMixinRegistrar(inst, agentJar, mods);
+        mixinRegistrar.start();
+    }
+
+    private static Thread createMixinRegistrar(Instrumentation inst, File agentJar, List<ModEntry> mods) {
         Thread mixinRegistrar = new Thread(() -> {
             try {
                 AgentLog.log("Waiting for MixinEnvironment...");
@@ -177,14 +182,10 @@ public class AgentBootstrap {
                     addURL = URLClassLoader.class.getDeclaredMethod("addURL", URL.class);
                     addURL.setAccessible(true);
                 }
-
                 Class<?> mixins  = Class.forName("org.spongepowered.asm.mixin.Mixins", true, mixinLoader);
                 Method addConfig = mixins.getMethod("addConfiguration", String.class);
-
                 Path patchDir = Files.createTempDirectory("agent-mixin-patch-");
                 patchDir.toFile().deleteOnExit();
-
-                // Defensively patch the agent's own bootstrap mixin JSON too
                 try (JarFile agentJf = new JarFile(agentJar)) {
                     JarEntry e = agentJf.getJarEntry("mixins.agent.json");
                     if (e != null) {
@@ -195,12 +196,8 @@ public class AgentBootstrap {
                         }
                     }
                 } catch (Exception ignored) {}
-
-                // patchDir goes in FIRST so IchorClassLoader finds our pre-patched .class
-                // and .json files before seeing the originals inside the mod JARs.
                 addURL.invoke(mixinLoader, patchDir.toUri().toURL());
                 AgentLog.log("Pre-patch dir added first to IchorClassLoader: " + patchDir);
-
                 addURL.invoke(mixinLoader, agentJar.toURI().toURL()); // TODO: This might not work properly on some java versions
                 AgentLog.log("Agent JAR added to IchorClassLoader.");
 
@@ -217,7 +214,7 @@ public class AgentBootstrap {
             }
         });
         mixinRegistrar.setDaemon(true);
-        mixinRegistrar.start();
+        return mixinRegistrar;
     }
 
     // TODO: umm I might have broken this idk why it has no usages now and too lazy to check rn - tatp :3
@@ -245,10 +242,6 @@ public class AgentBootstrap {
         return bytes;
     }
 
-
-    // For every @Accessor or @Invoker method that does NOT already have an explicit
-    // value= attribute, injects one by inflecting from the current (pre-rename) method name.
-    // This must run BEFORE applyRenames so the inflection still produces the correct field name.
     private static byte[] injectExplicitAccessorValues(byte[] bytes) {
         final String ACCESSOR = "Lorg/spongepowered/asm/mixin/gen/Accessor;";
         final String INVOKER  = "Lorg/spongepowered/asm/mixin/gen/Invoker;";
@@ -363,8 +356,6 @@ public class AgentBootstrap {
         return result;
     }
 
-    // Scans all @Mixin-annotated classes in every mod JAR for @Accessor/@Invoker methods
-    // and builds a rename map: "ownerInternalName\nmethodName\ndescriptor" → "methodName_modPrefix".
     private static Map<String, String> buildAccessorRenameMap(List<ModEntry> mods) {
         Map<String, String> renames = new HashMap<>();
         final String ACCESSOR = "Lorg/spongepowered/asm/mixin/gen/Accessor;";
@@ -402,10 +393,6 @@ public class AgentBootstrap {
                                     @Override
                                     public org.objectweb.asm.AnnotationVisitor visitAnnotation(String desc, boolean v) {
                                         if (!ACCESSOR.equals(desc) && !INVOKER.equals(desc)) return null;
-
-                                        // Suffix the mod prefix so the get/set/is/call/invoke prefix
-                                        // stays at position 0 — Mixin inflects from the start of the
-                                        // name and would fail if the prefix came first.
                                         String newName = name + "_" + prefix;
 
                                         String interfaceKey = internalName + "\n" + name + "\n" + descriptor;
@@ -488,7 +475,13 @@ public class AgentBootstrap {
             String property = parts.length > 1 ? parts[1] : "";
 
             try {
-                initMod(className, property, modLoader, configDir);
+                if (parts.length > 2 && "static".equals(parts[2])) {
+                    if (property.isEmpty() || Boolean.getBoolean(property)) {
+                        initStaticMod(className, modLoader);
+                    }
+                } else {
+                    initMod(className, property, modLoader, configDir);
+                }
             } catch (Throwable t) {
                 AgentLog.log("Failed to init mod: " + className + " -- " + t);
                 t.printStackTrace();
@@ -538,6 +531,27 @@ public class AgentBootstrap {
         return fallback;
     }
 
+    static void initStaticMod(String className, ClassLoader loader) throws ReflectiveOperationException {
+        Class<?> type = Class.forName(className.replace('/', '.'), true, loader);
+        Method init = type.getMethod("init");
+        if (!java.lang.reflect.Modifier.isStatic(init.getModifiers())) {
+            throw new IllegalArgumentException("Non-Forge entrypoint init() must be static: " + className);
+        }
+        Method preInit = null;
+        try {
+            preInit = type.getMethod("preInit");
+            if (!java.lang.reflect.Modifier.isStatic(preInit.getModifiers())) {
+                throw new IllegalArgumentException("Non-Forge entrypoint preInit() must be static: " + className);
+            }
+        } catch (NoSuchMethodException optional) {
+            // Only init() is required by the explicit static-entrypoint contract.
+        }
+        AgentLog.log("Initializing explicit non-Forge entrypoint: " + className);
+        if (preInit != null) preInit.invoke(null);
+        init.invoke(null);
+        AgentLog.log("Initialized explicit non-Forge entrypoint: " + className);
+    }
+
     private static void initMod(String className, String property,
                                 ClassLoader modLoader, File configDir) throws Exception {
         if (!property.isEmpty() && !Boolean.getBoolean(property)) {
@@ -576,11 +590,19 @@ public class AgentBootstrap {
         }
     }
 
-    private static String buildModListProperty(List<ModEntry> mods) {
+    static String buildModListProperty(List<ModEntry> mods) {
         StringBuilder sb = new StringBuilder();
         for (ModEntry mod : mods) {
             File f = new File(mod.getJar());
             if (!f.exists()) continue;
+            if (mod.getEntrypoint() != null && !mod.getEntrypoint().isEmpty()) {
+                if (sb.length() > 0) sb.append(",");
+                sb.append(mod.getEntrypoint().replace('.', '/'))
+                        .append("|").append(mod.getProperty() != null ? mod.getProperty() : "")
+                        .append("|static");
+                AgentLog.log("Configured non-Forge entrypoint: " + mod.getEntrypoint());
+                continue;
+            }
             try (JarFile jf = new JarFile(f)) {
                 for (java.util.jar.JarEntry entry : Collections.list(jf.entries())) {
                     if (!entry.getName().endsWith(".class")) continue;
@@ -691,57 +713,112 @@ public class AgentBootstrap {
         return out.toByteArray();
     }
 
-    private static void registerAsm(Instrumentation inst, ModEntry mod) {
+    private static void registerAsm(Instrumentation inst, ModEntry mod, MappingRegistry mappings,
+                                    AtomicReference<Environment> runtimeEnvironment,
+                                    Set<String> modClassNames) {
         final String asmClassName = mod.getAsm();
         final File modJarFile = new File(mod.getJar());
 
-        inst.addTransformer(new ClassFileTransformer() {
-            private volatile Method transform;
+        // Load and initialize the transformer immediately. Lunar can define a handful of
+        // Minecraft classes while its mixin pipeline is still starting; waiting for the
+        // first GenesisClassLoader callback allowed those classes to permanently bypass ASM.
+        final AsmHandle eagerHandle = initializeAsmTransformer(
+                asmClassName, modJarFile, ClassLoader.getSystemClassLoader(),
+                runtimeEnvironment.get() == Environment.OBF ? "ave"
+                        : runtimeEnvironment.get() == Environment.SRG ? "srg"
+                        : "net/minecraft/client/Minecraft");
+
+        ClassFileTransformer asmTransformer = new ClassFileTransformer() {
+            private volatile Method transform = eagerHandle != null ? eagerHandle.transform : null;
+            private volatile ClassLoader transformerLoader = eagerHandle != null ? eagerHandle.loader : null;
             private final Object initLock = new Object();
+            private final Set<ClassLoader> preparedLoaders =
+                    Collections.newSetFromMap(new IdentityHashMap<ClassLoader, Boolean>());
 
             @Override
             public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined, ProtectionDomain protectionDomain, byte[] classfileBuffer) {
                 if (className == null) return null;
+                // The diagnostic retransformation must not re-add accessor methods/interfaces.
+                if (BadlionTickProbe.isProbeRetransformation(classBeingRedefined)) return null;
+
+                final boolean minecraftEntry = className.equals("ave")
+                        || className.equals("net/minecraft/client/Minecraft");
+                // Badlion defines Entity, GuiScreen, Block and others before Minecraft; preparing only
+                // on Minecraft let those base classes bypass the mod's patches for the whole session.
+                final boolean badlionGameClass = BadlionFinalStage.isInstalled()
+                        && runtimeEnvironment.get() == Environment.OBF
+                        && mappings.hasClass(MappingRegistry.Namespace.OBF, className);
+                final boolean genesisLoader = isGenesisLoader(loader);
+                final boolean ichorLoader = isIchorLoader(loader);
+                final boolean prepared;
+                synchronized (preparedLoaders) {
+                    prepared = preparedLoaders.contains(loader);
+                }
+                if (loader == null || (!minecraftEntry && !badlionGameClass && !genesisLoader && !ichorLoader && !prepared)) {
+                    return null;
+                }
+
+                // The implementation lives in an isolated loader, but injected hook owners
+                // must resolve in the same game loader as Minecraft itself.
+                synchronized (preparedLoaders) {
+                    if (!preparedLoaders.contains(loader)) {
+                        try {
+                            final ClassLoader hookLoader = ichorLoader
+                                    && isGenesisLoader(loader.getParent())
+                                    ? loader.getParent() : loader;
+                            addJarToClassLoader(hookLoader, modJarFile);
+                            if (isGenesisLoader(hookLoader)) {
+                                preloadGenesisClassCache(hookLoader, modJarFile);
+                            }
+                            preparedLoaders.add(loader);
+                            AgentLog.log("ASM prepared target loader " + loader
+                                    + " with hook owner loader " + hookLoader);
+                        } catch (Exception e) {
+                            AgentLog.log("Failed to prepare ASM target loader " + loader + ": " + e);
+                            return null;
+                        }
+                    }
+                }
 
                 Method m = transform;
                 if (m == null) {
-                    if (loader == null || !className.equals("ave")) {
-                        return null;
-                    }
                     synchronized (initLock) {
                         m = transform;
                         if (m == null) {
-                            try {
-                                if (!modJarFile.exists()) {
-                                    AgentLog.log("ASM: jar not found, skipping: " + modJarFile);
-                                    return null;
-                                }
-
-                                final ClassLoader systemLoader = ClassLoader.getSystemClassLoader();
-                                final Class<?> transformerClass = Class.forName(asmClassName, true, systemLoader);
-
-                                try {
-                                    final Method init = transformerClass.getMethod("init", File.class, ClassLoader.class);
-                                    init.invoke(null, modJarFile, loader);
-                                    AgentLog.log("ASM init() called for: " + asmClassName);
-                                } catch (NoSuchMethodException e) {
-                                    AgentLog.log("ASM transformer has no init(File, ClassLoader), skipping: " + asmClassName);
-                                }
-                                m = transformerClass.getMethod("transform", String.class, byte[].class, ClassLoader.class);
-                                transform = m;
-                            } catch (Exception e) {
-                                AgentLog.log("Failed to initialize ASM transformer: " + asmClassName + " - " + e);
-                                e.printStackTrace();
+                            final AsmHandle handle = initializeAsmTransformer(
+                                    asmClassName, modJarFile, loader,
+                                    className.equals("ave") ? "ave" : "net/minecraft/client/Minecraft");
+                            if (handle == null) {
                                 return null;
                             }
+                            transformerLoader = handle.loader;
+                            transform = handle.transform;
+                            m = handle.transform;
                         }
                     }
                 }
 
                 try {
-                    return (byte[]) m.invoke(null, className, classfileBuffer, loader);
+                    ClassLoader frameResources = BadlionFinalStage.isInstalled()
+                            ? new BadlionFrameResources(loader) : loader;
+                    byte[] transformed = (byte[]) m.invoke(null, className, classfileBuffer, frameResources);
+                    if (transformed != null && transformed != classfileBuffer
+                            && runtimeEnvironment.get() != Environment.MCP) {
+                        if (BadlionFinalStage.isInstalled()) {
+                            transformed = RuntimeRemapper.remapInjectedBytes(classfileBuffer, transformed,
+                                    mappings, runtimeEnvironment.get(), modClassNames, loader);
+                            AgentLog.log("Badlion post-ASM remap scoped to additions for " + className
+                                    + "; original client member names retained");
+                        } else {
+                            transformed = RuntimeRemapper.remapBytes(transformed, mappings,
+                                    runtimeEnvironment.get(), modClassNames, loader);
+                        }
+                    }
+                    if (minecraftEntry) BadlionTickProbe.reportOutput(className, classfileBuffer, transformed);
+                    return transformed;
                 } catch (InvocationTargetException e) {
                     AgentLog.log("Failed transforming " + className);
+                    AsmFailureDiagnostics.log(className, classfileBuffer, mappings, runtimeEnvironment.get());
                     final Throwable cause = e.getCause();
                     if (cause != null) {
                         final StringWriter sw = new StringWriter();
@@ -753,8 +830,158 @@ public class AgentBootstrap {
                     throw new RuntimeException(e);
                 }
             }
-        }, true);
+        };
+        if (BadlionFinalStage.enabledForLaunch()) {
+            BadlionFinalStage.register(asmTransformer, collectModClassNames(Collections.singletonList(mod)));
+        } else {
+            inst.addTransformer(asmTransformer, true);
+        }
         AgentLog.log("ASM registered for: " + asmClassName);
+    }
+
+    private static AsmHandle initializeAsmTransformer(String asmClassName, File modJarFile,
+                                                       ClassLoader targetLoader,
+                                                       String minecraftClassName) {
+        try {
+            if (!modJarFile.exists()) {
+                AgentLog.log("ASM: jar not found, skipping: " + modJarFile);
+                return null;
+            }
+
+            // Keep transformer implementation classes isolated from the system loader.
+            final URLClassLoader asmLoader = new URLClassLoader(
+                    new URL[]{modJarFile.toURI().toURL()},
+                    ClassLoader.getSystemClassLoader()) {
+                @Override
+                protected synchronized Class<?> loadClass(String name, boolean resolve)
+                        throws ClassNotFoundException {
+                    // The game loader receives this same JAR later. Parent-first lookup
+                    // would split lazily loaded transformer helpers from their initialized
+                    // hook registry, silently leaving the game without any hooks.
+                    Class<?> type = findLoadedClass(name);
+                    if (type == null && !name.startsWith("java.")
+                            && !name.startsWith("javax.") && !name.startsWith("sun.")) {
+                        try {
+                            type = findClass(name);
+                        } catch (ClassNotFoundException ignored) {
+                            // Platform and agent dependencies remain parent-owned.
+                        }
+                    }
+                    if (type == null) type = super.loadClass(name, false);
+                    if (resolve) resolveClass(type);
+                    return type;
+                }
+            };
+            final Class<?> transformerClass = Class.forName(asmClassName, true, asmLoader);
+
+            try {
+                final Method init = transformerClass.getMethod(
+                        "init", File.class, ClassLoader.class, String.class);
+                init.invoke(null, modJarFile, targetLoader, minecraftClassName);
+                AgentLog.log("ASM init(File, ClassLoader, String) called for: " + asmClassName);
+            } catch (NoSuchMethodException extendedMissing) {
+                try {
+                    final Method init = transformerClass.getMethod(
+                            "init", File.class, ClassLoader.class);
+                    init.invoke(null, modJarFile, targetLoader);
+                    AgentLog.log("ASM init(File, ClassLoader) called for: " + asmClassName);
+                } catch (NoSuchMethodException legacyMissing) {
+                    AgentLog.log("ASM transformer has no supported init method, skipping: " + asmClassName);
+                }
+            }
+
+            final Method transform = transformerClass.getMethod(
+                    "transform", String.class, byte[].class, ClassLoader.class);
+            return new AsmHandle(asmLoader, transform);
+        } catch (Exception e) {
+            AgentLog.log("Failed to initialize ASM transformer: " + asmClassName + " - " + e);
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    private static final class AsmHandle {
+        final ClassLoader loader;
+        final Method transform;
+
+        AsmHandle(ClassLoader loader, Method transform) {
+            this.loader = loader;
+            this.transform = transform;
+        }
+    }
+
+    private static boolean isGenesisLoader(ClassLoader loader) {
+        if (loader == null) return false;
+        return String.valueOf(loader).startsWith("GenesisClassLoader(");
+    }
+
+    private static boolean isIchorLoader(ClassLoader loader) {
+        if (loader == null) return false;
+        return String.valueOf(loader).startsWith("IchorClassLoader(");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void preloadGenesisClassCache(ClassLoader loader, File jarFile) throws Exception {
+        Method cacheAccessor = null;
+        for (Method method : loader.getClass().getMethods()) {
+            if (method.getParameterCount() == 0
+                    && java.util.concurrent.ConcurrentMap.class.isAssignableFrom(method.getReturnType())) {
+                cacheAccessor = method;
+                break;
+            }
+        }
+
+        if (cacheAccessor == null) {
+            throw new IllegalStateException("Genesis class byte cache accessor was not found");
+        }
+
+        final java.util.concurrent.ConcurrentMap<String, byte[]> classCache =
+                (java.util.concurrent.ConcurrentMap<String, byte[]>) cacheAccessor.invoke(loader);
+        int added = 0;
+
+        try (JarFile jar = new JarFile(jarFile)) {
+            final Enumeration<JarEntry> entries = jar.entries();
+            while (entries.hasMoreElements()) {
+                final JarEntry entry = entries.nextElement();
+                final String entryName = entry.getName();
+                if (entry.isDirectory() || !entryName.endsWith(".class")
+                        || entryName.startsWith("META-INF/")) {
+                    continue;
+                }
+
+                final String className = entryName.substring(0, entryName.length() - 6)
+                        .replace('/', '.');
+                try (InputStream input = jar.getInputStream(entry)) {
+                    if (classCache.putIfAbsent(className, toByteArray(input)) == null) {
+                        added++;
+                    }
+                }
+            }
+        }
+
+        AgentLog.log("Preloaded " + added + " ASM JAR classes into Genesis byte cache.");
+    }
+
+    private static void addJarToClassLoader(ClassLoader loader, File jarFile) throws Exception {
+        final URL url = jarFile.toURI().toURL();
+        try {
+            final Method addURL = loader.getClass().getMethod("addURL", URL.class);
+            addURL.invoke(loader, url);
+            AgentLog.log("ASM JAR added to target classloader: " + url);
+            return;
+        } catch (NoSuchMethodException ignored) {
+            // Fall through for ordinary URLClassLoader implementations, not fatal.
+        }
+
+        if (loader instanceof URLClassLoader) {
+            final Method addURL = URLClassLoader.class.getDeclaredMethod("addURL", URL.class);
+            addURL.setAccessible(true);
+            addURL.invoke(loader, url);
+            AgentLog.log("ASM JAR added to URLClassLoader: " + url);
+            return;
+        }
+
+        throw new IllegalStateException("Target classloader cannot accept URLs: " + loader.getClass().getName());
     }
 
     private static void appendToSystemClassLoader(Instrumentation instrumentation, File jarFile) throws IOException {

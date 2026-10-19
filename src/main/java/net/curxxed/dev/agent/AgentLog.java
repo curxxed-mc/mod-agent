@@ -21,14 +21,23 @@ public final class AgentLog {
     private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
 
     static {
+        Path selected = null;
         try {
             final Path jarDir = Paths.get(AgentLog.class.getProtectionDomain().getCodeSource().getLocation().toURI()).getParent();
-
-            LOG_FILE = jarDir.resolve("mod-agent.log");
-
-            Files.deleteIfExists(LOG_FILE);
+            String override = System.getProperty("modagent.log.file", "");
+            Path besideJar = jarDir.resolve("mod-agent.log");
+            selected = !override.isEmpty() ? Paths.get(override).toAbsolutePath()
+                    : jarDir.toFile().canWrite() && (!Files.exists(besideJar) || besideJar.toFile().canWrite())
+                    ? besideJar : Paths.get(System.getProperty("user.home"), ".mod-agent", "mod-agent.log");
         } catch (Exception e) {
-            throw new RuntimeException("Failed to find current directory", e);
+            System.err.println("[Mod-Agent] Cannot select log file; console logging remains available: " + e);
+        }
+        LOG_FILE = selected;
+        if (LOG_FILE != null) {
+            try { Files.deleteIfExists(LOG_FILE); }
+            catch (IOException failure) {
+                System.err.println("[Mod-Agent] Cannot reset log file; will attempt append: " + failure);
+            }
         }
     }
 
@@ -46,8 +55,9 @@ public final class AgentLog {
         } catch (Throwable ignored) {}
 
         // File
+        if (LOG_FILE == null) return;
         try {
-            Files.createDirectories(LOG_FILE.getParent());
+            if (LOG_FILE.getParent() != null) Files.createDirectories(LOG_FILE.getParent());
 
             try (BufferedWriter writer = Files.newBufferedWriter(
                     LOG_FILE,

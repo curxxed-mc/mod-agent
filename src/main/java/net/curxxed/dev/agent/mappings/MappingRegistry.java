@@ -175,9 +175,9 @@ public class MappingRegistry {
 
         public String desc(Namespace namespace) {
             switch (namespace) {
-                case OBF: return obfName;
-                case SRG: return srgName;
-                case MCP: return mcpName;
+                case OBF: return obfDesc;
+                case SRG: return srgDesc;
+                case MCP: return mcpDesc;
                 default: throw new IllegalArgumentException("Unknown namespace: " + namespace);
             }
         }
@@ -342,6 +342,10 @@ public class MappingRegistry {
                 );
             }
         }
+    }
+
+    public boolean hasClass(Namespace namespace, String internalName) {
+        return classesByName.get(namespace).containsKey(internalName);
     }
 
     public int classCount() {
@@ -764,26 +768,16 @@ public class MappingRegistry {
             }
         }
 
-        if (descriptor != null) {
-
-            for (Namespace namespace : Namespace.values()) {
-
-                MethodMapping mapping =
-                        uniqueMethodsByNameDesc.get(namespace)
-                                .get(name + descriptor);
-
-                if (mapping != null) {
-                    return mapping;
-                }
-            }
-        }
+        // Readable and obfuscated names are not globally unique outside Minecraft.
+        // For example LWJGL Sys.getVersion() shares a Minecraft name/descriptor;
+        // matching without its owner incorrectly rewrites that library call to c().
 
         // Last resort: SRG func_ names are globally unique, so if the name is one we
         // recognise we can return the mapping directly regardless of owner or descriptor.
         // This fires when the call-site owner is a subclass that inherits the method
         // and we cannot traverse the hierarchy at runtime (e.g. the class loader doesn't
         // expose Minecraft .class resources via getResourceAsStream).
-        MethodMapping byFuncName = methodsBySrgName.get(name);
+        MethodMapping byFuncName = name.startsWith("func_") ? methodsBySrgName.get(name) : null;
         if (byFuncName != null) {
             return byFuncName;
         }
@@ -820,19 +814,10 @@ public class MappingRegistry {
             }
         }
 
-        for (Namespace namespace : Namespace.values()) {
-
-            FieldMapping mapping =
-                    uniqueFieldsByName.get(namespace)
-                            .get(name);
-
-            if (mapping != null) {
-                return mapping;
-            }
-        }
+        // Do not match arbitrary library fields by their name alone.
 
         // Last resort: SRG field_ names are globally unique — same logic as findMethod.
-        FieldMapping byFieldName = fieldsBySrgName.get(name);
+        FieldMapping byFieldName = name.startsWith("field_") ? fieldsBySrgName.get(name) : null;
         if (byFieldName != null) {
             return byFieldName;
         }

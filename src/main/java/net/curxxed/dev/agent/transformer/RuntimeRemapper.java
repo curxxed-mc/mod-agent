@@ -1,13 +1,16 @@
 package net.curxxed.dev.agent.transformer;
 
 import net.curxxed.dev.agent.AgentLog;
+import net.curxxed.dev.agent.BadlionFinalStage;
 import net.curxxed.dev.agent.enums.Environment;
 import net.curxxed.dev.agent.mappings.MappingRegistry;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.ClassVisitor;
+import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.commons.ClassRemapper;
+import org.objectweb.asm.commons.MethodRemapper;
 import org.objectweb.asm.commons.Remapper;
 import java.io.*;
 import java.lang.instrument.ClassFileTransformer;
@@ -18,29 +21,57 @@ import java.util.function.Supplier;
 
 // Translates mod bytecode from any known mapping namespace (obf, SRG, MCP)
 // into the namespace used by the current runtime.
-// TODO: Remap enums properly (refer to Meowtils HookItemRenderer)
+// TODO: Remap enums properly.
 public class RuntimeRemapper implements ClassFileTransformer {
+    private static final java.util.Map<ClassLoader, Set<String>> METADATA_WARNINGS =
+            java.util.Collections.synchronizedMap(new java.util.IdentityHashMap<>());
+
+    private static void warnMetadataOnce(ClassLoader loader, String name, byte[] bytes, RuntimeException failure) {
+        synchronized (METADATA_WARNINGS) {
+            Set<String> warned = METADATA_WARNINGS.computeIfAbsent(loader, ignored -> new HashSet<>());
+            if (!warned.add(name)) return;
+        }
+        AgentLog.log("Remapper hierarchy metadata unavailable: " + name + " loader=" + loader
+                + " resourceBytes=" + (bytes == null ? 0 : bytes.length) + " reason=" + failure
+                + "; retaining direct mappings, skipping optional hierarchy lookup");
+    }
 
     private final MappingRegistry mappings;
     private final Supplier<Environment> environmentSupplier;
     private final Set<String> modClassNames;
+    private final Set<String> remapLoaders;
 
     public RuntimeRemapper(Set<String> modClassNames,
                            MappingRegistry mappings,
                            Supplier<Environment> environmentSupplier) {
+        this(modClassNames, mappings, environmentSupplier, java.util.Collections.emptySet());
+    }
+
+    public RuntimeRemapper(Set<String> modClassNames, MappingRegistry mappings,
+                           Supplier<Environment> environmentSupplier, Set<String> remapLoaders) {
         this.modClassNames = modClassNames;
         this.mappings = mappings;
         this.environmentSupplier = environmentSupplier;
+        this.remapLoaders = java.util.Collections.unmodifiableSet(new HashSet<>(remapLoaders));
         AgentLog.log("RuntimeRemapper ready: " + mappings.classCount() + " classes, " + mappings.methodCount() + " methods, " + mappings.fieldCount() + " fields.");
     }
 
     @Override
     public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined,
                             ProtectionDomain domain, byte[] classfileBuffer) {
-        if (className == null || !modClassNames.contains(className)) return null;
+        if (className == null) return null;
+        // Optional in-memory plugin loaders are declared by mods, not named in agent code.
+        String loaderName = loader != null ? loader.getClass().getName() : "";
+        boolean extension = remapLoaders.contains(loaderName);
+        if (!modClassNames.contains(className) && !extension) return null;
 
         Environment environment = environmentSupplier.get();
-        byte[] remapped = remapBytes(classfileBuffer, mappings, environment, modClassNames, loader);
+        Set<String> protectedNames = modClassNames;
+        if (extension) {
+            protectedNames = new HashSet<>(modClassNames);
+            protectedNames.add(className);
+        }
+        byte[] remapped = remapBytes(classfileBuffer, mappings, environment, protectedNames, loader);
         if (remapped == classfileBuffer) return null;
 
         AgentLog.log("Remapped " + className + " to " + environment + " runtime names");
@@ -58,6 +89,65 @@ public class RuntimeRemapper implements ClassFileTransformer {
                 loader, mappings, environment.namespace(), protectedClassNames);
         cr.accept(new ClassRemapper(cw, remapper), 0);
         return remapper.changed() ? cw.toByteArray() : bytes;
+    }
+
+    /** Native clients already chose their runtime names. Translate only ASM additions. */
+    public static byte[] remapInjectedBytes(byte[] original, byte[] patched,
+                                            MappingRegistry mappings, Environment environment,
+                                            Set<String> modClasses, ClassLoader loader) {
+        Set<String> originalMethods = new HashSet<>();
+        Set<String> originalFrameTypes = new HashSet<>();
+        new ClassReader(original).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override public MethodVisitor visitMethod(int access, String name, String desc, String sig, String[] exceptions) {
+                originalMethods.add(name + desc);
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override public void visitFrame(int type, int locals, Object[] local, int stacks, Object[] stack) {
+                        rememberFrame(local, locals);
+                        rememberFrame(stack, stacks);
+                    }
+                    private void rememberFrame(Object[] values, int count) {
+                        for (int i = 0; values != null && i < count; i++) {
+                            if (values[i] instanceof String) originalFrameTypes.add((String) values[i]);
+                        }
+                    }
+                };
+            }
+        }, ClassReader.SKIP_DEBUG);
+        ClassReader reader = new ClassReader(patched);
+        ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_MAXS);
+        NamespaceRemapper remapper = new NamespaceRemapper(loader, mappings, environment.namespace(), modClasses);
+        reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
+            @Override public MethodVisitor visitMethod(int access, String name, String desc, String sig, String[] exceptions) {
+                if (!originalMethods.contains(name + desc)) {
+                    MethodVisitor added = super.visitMethod(access, name, remapper.mapMethodDesc(desc),
+                            remapper.mapSignature(sig, false), exceptions == null ? null : remapper.mapTypes(exceptions));
+                    return new MethodRemapper(added, remapper);
+                }
+                MethodVisitor existing = super.visitMethod(access, name, desc, sig, exceptions);
+                return new MethodVisitor(Opcodes.ASM9, existing) {
+                    @Override public void visitMethodInsn(int opcode, String owner, String method, String descriptor, boolean iface) {
+                        // The inserted handler is mod-owned. Original client calls are
+                        // deliberately not fed through the namespace remapper.
+                        super.visitMethodInsn(opcode, owner, method,
+                                modClasses.contains(owner) ? remapper.mapMethodDesc(descriptor) : descriptor, iface);
+                    }
+                    @Override public void visitFrame(int type, int locals, Object[] local, int stacks, Object[] stack) {
+                        super.visitFrame(type, locals, mapNewFrameTypes(local, locals), stacks, mapNewFrameTypes(stack, stacks));
+                    }
+                    private Object[] mapNewFrameTypes(Object[] values, int count) {
+                        if (values == null) return null;
+                        Object[] result = values.clone();
+                        for (int i = 0; i < count; i++) {
+                            if (result[i] instanceof String && !originalFrameTypes.contains(result[i])) {
+                                result[i] = remapper.mapType((String) result[i]);
+                            }
+                        }
+                        return result;
+                    }
+                };
+            }
+        }, 0);
+        return remapper.changed() ? writer.toByteArray() : patched;
     }
 
     private static class NamespaceRemapper extends Remapper {
@@ -107,7 +197,6 @@ public class RuntimeRemapper implements ClassFileTransformer {
 
         @Override
         public String mapFieldName(String owner, String name, String descriptor) {
-            if (protectedClassNames.contains(owner)) return name;
             if (owner.startsWith("java/") || owner.startsWith("javax/") || owner.startsWith("jdk/") || owner.startsWith("sun/") || owner.startsWith("com/sun/")) return name;
             seedSuperClassChain(owner);
             String mapped = mappings.mapFieldName(owner, name, descriptor, targetNamespace);
@@ -119,8 +208,8 @@ public class RuntimeRemapper implements ClassFileTransformer {
         // parent relationship into MappingRegistry.superClasses so that findMethod's
         // while-loop chain walk can follow them.
         //
-        // This only helps when the class loader exposes .class resources (e.g. vanilla
-        // Forge/MCP environments). It silently no-ops when bytes are unavailable.
+        // Prefer observed/loaded hierarchy metadata for protected native clients.
+        // Missing or non-class resources must not discard the transformed game class.
         // The primary fix for the inherited-method case is in MappingRegistry.findMethod
         // via the SRG-name direct lookup.
         private void seedSuperClassChain(String internalName) {
@@ -140,19 +229,32 @@ public class RuntimeRemapper implements ClassFileTransformer {
         }
 
         private ClassInfo readClassInfo(String internalName) {
+            if (BadlionFinalStage.isInstalled()) {
+                byte[] runtime = BadlionFinalStage.runtimeMetadata(internalName, loader, false);
+                if (runtime != null) return parseClassInfo(internalName, runtime);
+            }
             byte[] bytes = readClassBytes(internalName);
             if (bytes == null) return null;
+            try {
+                return parseClassInfo(internalName, bytes);
+            } catch (RuntimeException failure) {
+                // Resources supplied by protected loaders need not be class files.
+                // This lookup is optional; direct mappings still remain valid.
+                warnMetadataOnce(loader, internalName, bytes, failure);
+                return null;
+            }
+        }
 
-            final ClassInfo[] out = {null};
+        private ClassInfo parseClassInfo(String internalName, byte[] bytes) {
+            if (bytes.length < 10 || bytes[0] != (byte) 0xca || bytes[1] != (byte) 0xfe
+                    || bytes[2] != (byte) 0xba || bytes[3] != (byte) 0xbe) {
+                throw new IllegalArgumentException("Resource is not a class file");
+            }
             ClassReader cr = new ClassReader(bytes);
-            cr.accept(new ClassVisitor(Opcodes.ASM9) {
-                @Override
-                public void visit(int version, int access, String name, String signature,
-                                  String superName, String[] interfaces) {
-                    out[0] = new ClassInfo(superName, interfaces == null ? new String[0] : interfaces);
-                }
-            }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
-            return out[0];
+            if (!internalName.equals(cr.getClassName())) {
+                throw new IllegalArgumentException("Unexpected resource class: " + cr.getClassName());
+            }
+            return new ClassInfo(cr.getSuperName(), cr.getInterfaces());
         }
 
         private byte[] readClassBytes(String internalName) {
