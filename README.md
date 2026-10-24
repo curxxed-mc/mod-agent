@@ -167,7 +167,9 @@ The transformer runs in its own class loader, while the hook classes your patche
 
 #### Lunar Client
 
-In the Lunar Client launcher go to **Settings → JVM Arguments** and add:
+The easiest way: double-click `lunar-agent.jar`, check that **Mod configuration** points at your `agent-mods.json`, and press **Copy JVM argument** under *Lunar (JVM argument)*. Paste the result into Lunar's **Settings → JVM Arguments**. If the agent or config path contains a space (which Lunar can't handle), the agent and config are first copied to a folder without spaces (`C:\lunar-agent` on Windows, `~/.mod-agent/lunar` elsewhere) and the argument points there. Press the button again whenever you change your config or update the agent.
+
+To write it by hand instead, go to **Settings → JVM Arguments** and add:
 
 ```
 -javaagent:C:\Users\<User>\Documents\lunar-agent\lunar-agent.jar=C:\Users\<User>\Documents\lunar-agent\agent-mods.json
@@ -240,7 +242,7 @@ You do not need to do any of the following in your mod source:
 
 **Mixin conflicts with Lunar** — Switch from `@Overwrite` to `@Inject` or `@Redirect` (although not always).
 
-**Game won't start: `Error opening zip file or JAR manifest missing : C:\Users\my`** — A path in your JVM argument contains a space (e.g. a Windows username like `my name`). Lunar splits the JVM Arguments field on every space and doesn't support quotes, so `-javaagent:C:\Users\my name\lunar-agent.jar=...` reaches Java cut off at the space, and adding quotes doesn't help. Move `lunar-agent.jar`, `agent-mods.json` and your mods to a folder without spaces anywhere in its path, such as `C:\lunar-agent\`, and update the JVM argument. Paths *inside* `agent-mods.json` may contain spaces. Badlion setup (`setup-badlion`) is not affected.
+**Game won't start: `Error opening zip file or JAR manifest missing : C:\Users\my`** — A path in your JVM argument contains a space (e.g. a Windows username like `my name`). Lunar splits the JVM Arguments field on every space and doesn't support quotes, so `-javaagent:C:\Users\my name\lunar-agent.jar=...` reaches Java cut off at the space, and adding quotes doesn't help. Press **Copy JVM argument** in the agent's window, which copies the agent and config to a folder without spaces and gives you a working argument. Or move `lunar-agent.jar` and `agent-mods.json` to a folder without spaces anywhere in its path, such as `C:\lunar-agent\`, and update the JVM argument yourself. Paths *inside* `agent-mods.json` may contain spaces. Badlion setup (`setup-badlion`) is not affected.
 
 **`agent library failed to init` on startup** — If it's preceded by `Error opening zip file`, see the entry above. Otherwise you used `./gradlew jar` instead of `./gradlew shadowJar`. Always use `shadowJar`.
 

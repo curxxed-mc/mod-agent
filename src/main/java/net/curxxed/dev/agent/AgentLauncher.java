@@ -106,6 +106,8 @@ public final class AgentLauncher {
             panel.add(javax.swing.Box.createVerticalStrut(10));
             panel.add(badlionPanel(window, agent, config));
             panel.add(javax.swing.Box.createVerticalStrut(10));
+            panel.add(lunarArgumentPanel(agent, config));
+            panel.add(javax.swing.Box.createVerticalStrut(10));
             panel.add(vanillaPanel(window, agent, config));
             window.setContentPane(panel);
             window.pack(); window.setLocationRelativeTo(null); window.setVisible(true);
@@ -147,6 +149,38 @@ public final class AgentLauncher {
                     report(status, "Could not restore: " + failure.getMessage());
                 } finally { reenable(install, restore); }
             }, "Mod-Agent-Badlion-Restore").start();
+        });
+        return panel;
+    }
+
+    private static JPanel lunarArgumentPanel(File agent, JTextField config) {
+        JPanel panel = new JPanel(new java.awt.BorderLayout(8, 8));
+        panel.setBorder(BorderFactory.createTitledBorder("Lunar (JVM argument)"));
+        JTextField argument = new JTextField(32);
+        argument.setEditable(false);
+        JButton copy = new JButton("Copy JVM argument");
+        JLabel status = new JLabel("Paste the result into Lunar: Settings > JVM Arguments (enable Advanced Settings).");
+        JPanel row = new JPanel(new java.awt.BorderLayout(6, 0));
+        row.add(argument); row.add(copy, java.awt.BorderLayout.EAST);
+        panel.add(row); panel.add(status, java.awt.BorderLayout.SOUTH);
+        copy.addActionListener(event -> {
+            copy.setEnabled(false);
+            File selectedConfig = new File(config.getText());
+            new Thread(() -> {
+                try {
+                    LunarJvmArgument.Result result = LunarJvmArgument.prepare(agent, selectedConfig, LunarJvmArgument.defaultFolder());
+                    SwingUtilities.invokeLater(() -> {
+                        argument.setText(result.argument);
+                        java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()
+                                .setContents(new java.awt.datatransfer.StringSelection(result.argument), null);
+                    });
+                    report(status, result.copiedTo == null ? "Copied to clipboard. Paste it into Lunar's JVM Arguments."
+                            : "Your path has a space, which Lunar can't handle, so the agent and config were copied to "
+                            + result.copiedTo + ". Copied to clipboard. Press again after changing your config.");
+                } catch (Throwable failure) {
+                    report(status, "Could not prepare: " + failure.getMessage());
+                } finally { reenable(copy); }
+            }, "Mod-Agent-Lunar-Argument").start();
         });
         return panel;
     }
