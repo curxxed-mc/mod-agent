@@ -264,4 +264,4 @@ You do not need to do any of the following in your mod source:
 
 ## License
 
-Copyright (c) 2026 curxxed. All rights reserved. No use, copying, modification or redistribution without written permission; see [LICENSE](LICENSE).
+Copyright (c) 2026 curxxed and tatp. All rights reserved. No use, copying, modification or redistribution without written permission; see [LICENSE](LICENSE).
