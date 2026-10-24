@@ -261,3 +261,7 @@ You do not need to do any of the following in your mod source:
 **Mixins or Forge mods do nothing on Badlion** — Badlion has no Mixin or Forge. Use an `asm` transformer plus a static `entrypoint`.
 
 **Removing the agent from Badlion** — Press **Undo** in the agent window or run `setup-badlion --restore`. That restores Lunar's previous Badlion Java path.
+
+## License
+
+Copyright (c) 2026 curxxed. All rights reserved. No use, copying, modification or redistribution without written permission; see [LICENSE](LICENSE).
