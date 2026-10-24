@@ -240,7 +240,9 @@ You do not need to do any of the following in your mod source:
 
 **Mixin conflicts with Lunar** — Switch from `@Overwrite` to `@Inject` or `@Redirect` (although not always).
 
-**`agent library failed to init` on startup** — You used `./gradlew jar` instead of `./gradlew shadowJar`. Always use `shadowJar`.
+**Game won't start: `Error opening zip file or JAR manifest missing : C:\Users\my`** — A path in your JVM argument contains a space (e.g. a Windows username like `my name`). Lunar splits the JVM Arguments field on every space and doesn't support quotes, so `-javaagent:C:\Users\my name\lunar-agent.jar=...` reaches Java cut off at the space, and adding quotes doesn't help. Move `lunar-agent.jar`, `agent-mods.json` and your mods to a folder without spaces anywhere in its path, such as `C:\lunar-agent\`, and update the JVM argument. Paths *inside* `agent-mods.json` may contain spaces. Badlion setup (`setup-badlion`) is not affected.
+
+**`agent library failed to init` on startup** — If it's preceded by `Error opening zip file`, see the entry above. Otherwise you used `./gradlew jar` instead of `./gradlew shadowJar`. Always use `shadowJar`.
 
 ### Badlion
 
