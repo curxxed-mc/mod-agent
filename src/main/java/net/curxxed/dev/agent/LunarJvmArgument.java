@@ -28,7 +28,7 @@ public final class LunarJvmArgument {
     public static Path defaultFolder() {
         if (System.getProperty("os.name", "").startsWith("Windows")) {
             String drive = System.getenv("SystemDrive");
-            return Paths.get((drive == null || drive.isEmpty() ? "C:" : drive) + "\\", "lunar-agent");
+            return Paths.get((drive == null || drive.isEmpty() ? "C:" : drive) + "\\", "mod-agent");
         }
         return Paths.get(System.getProperty("user.home"), ".mod-agent", "lunar");
     }
@@ -46,15 +46,18 @@ public final class LunarJvmArgument {
         if (hasSpace(folder)) {
             throw new IOException("The copy folder also contains a space: " + folder + ". Move the agent to a folder without spaces.");
         }
+
         Files.createDirectories(folder);
-        Path agentCopy = folder.resolve("lunar-agent.jar");
+        final Path agentCopy = folder.resolve("mod-agent.jar");
         if (!Files.exists(agentCopy) || !Files.isSameFile(agentPath, agentCopy)) {
             Files.copy(agentPath, agentCopy, StandardCopyOption.REPLACE_EXISTING);
         }
+
         Path configCopy = folder.resolve("agent-mods.json");
         String rewritten = absoluteModPaths(new String(Files.readAllBytes(configPath), StandardCharsets.UTF_8),
                 configPath.getParent());
         if (!Files.exists(configCopy) || !Files.isSameFile(configPath, configCopy)) {
+            Files.deleteIfExists(configCopy);
             Files.write(configCopy, rewritten.getBytes(StandardCharsets.UTF_8));
         }
         return new Result(argument(agentCopy, configCopy), folder);

@@ -113,13 +113,49 @@ public final class BadlionFinalStage {
         instrumentation.addTransformer(new ClassFileTransformer() {
             @Override public byte[] transform(ClassLoader loader, String name, Class<?> redefining,
                                               ProtectionDomain domain, byte[] bytes) {
-                if (redefining != null || name == null) return null;
+                // Retransformations start again from the pre-hook bytes, so mod hooks must be
+                // reapplied every time or the class loses them.
+                if (name == null) return null;
                 return BadlionFinalStage.transform(loader, name, bytes);
             }
         }, true);
         installed = true;
         System.setProperty("modagent.badlion.backend", "ready");
         AgentLog.log("Badlion final stage enabled (pure Java).");
+        retransformEarlyClasses();
+    }
+
+    /**
+     * Badlion's native agent defines certain game classes during JVM startup, before our own java agent runs,
+     * so they never end up reaching the class-file hook. Retransforming them gives the same bytes to mod
+     * transformers that Badlion would have in its final stage.
+     */
+    // TODO: Check limitations
+    private static void retransformEarlyClasses() {
+        if (TRANSFORMERS.isEmpty() || !instrumentation.isRetransformClassesSupported()) return;
+
+        final List<Class<?>> early = new ArrayList<>();
+        for (Class<?> type : instrumentation.getAllLoadedClasses()) {
+            // Obfuscated Minecraft classes live in the default package.
+            if (type.getClassLoader() == null || type.isArray() || type.getName().indexOf('.') >= 0) continue;
+            if (instrumentation.isModifiableClass(type)) early.add(type);
+        }
+
+        if (early.isEmpty()) return;
+        final List<String> names = new ArrayList<>();
+        for (Class<?> type : early) {
+            names.add(type.getName());
+        }
+
+        AgentLog.log("Badlion loaded " + early.size() + " game classes before this agent: " + names);
+
+        for (Class<?> type : early) {
+            try {
+                instrumentation.retransformClasses(type);
+            } catch (Throwable t) {
+                AgentLog.log("Badlion early class " + type.getName() + " could not be patched: " + t);
+            }
+        }
     }
 
     private static void logAgentOrder(List<String> arguments) {
@@ -157,7 +193,7 @@ public final class BadlionFinalStage {
         return firstJava >= 0 && lastNative > firstJava;
     }
 
-    /** Called only for initial class definitions. */
+    /** Called for initial class definitions and for every retransformation. */
     public static byte[] transform(ClassLoader loader, String name, byte[] bytes) {
         if (loader == null || bytes == null) return null;
         byte[] result = bytes;

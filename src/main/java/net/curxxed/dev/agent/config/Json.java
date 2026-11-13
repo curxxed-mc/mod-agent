@@ -93,6 +93,16 @@ public final class Json {
         position++; return true;
     }
     private IllegalArgumentException error(String message) {
-        return new IllegalArgumentException(message + " at JSON character " + position);
+        int line = 1;
+        int column = 1;
+
+        for (int i = 0; i < position && i < source.length(); i++) {
+            if (source.charAt(i) == '\n') {
+                line++; column = 1;
+            } else {
+                column++;
+            }
+        }
+        return new IllegalArgumentException(message + " at line " + line + ", column " + column);
     }
 }

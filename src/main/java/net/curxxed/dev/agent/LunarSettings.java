@@ -47,6 +47,7 @@ public final class LunarSettings {
     }
 
     /** Writes a backup, then replaces only the badlion.javaPath string. Returns the backup path. */
+    @SuppressWarnings("unchecked")
     public static Path setJavaPath(String newValue) throws IOException {
         Path file = settingsFile();
         if (!Files.isRegularFile(file)) {
@@ -54,15 +55,20 @@ public final class LunarSettings {
         }
         String text = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
         // Validate it is well-formed and actually has the badlion object before editing bytes.
-        Object badlion = child(child(Json.parse(text), "settings"), "badlion");
+        final Object expected = Json.parse(text);
+        final Object badlion = child(child(expected, "settings"), "badlion");
         if (!(badlion instanceof Map)) {
             throw new IOException("Lunar settings has no Badlion section yet; open Lunar's Badlion settings once, then retry.");
         }
         String edited = replaceJavaPath(text, newValue);
-        // Re-parse the result so a broken edit never reaches disk.
-        if (!(child(child(Json.parse(edited), "settings"), "badlion") instanceof Map)) {
+        // Reparse the result so a broken or misplaced edit never reaches disk.
+        // It must equal the original settings with only badlion.javaPath changed.
+        final Map<String, Object> badlionSettings = (Map<String, Object>) badlion;
+        badlionSettings.put("javaPath", newValue);
+        if (!expected.equals(Json.parse(edited))) {
             throw new IOException("Internal error: edited settings failed validation");
         }
+
         String stamp = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").format(ZonedDateTime.now(ZoneOffset.UTC));
         Path backup = file.resolveSibling(file.getFileName() + ".backup-before-mod-agent-" + stamp);
         for (int suffix = 2; Files.exists(backup); suffix++) {
@@ -75,12 +81,30 @@ public final class LunarSettings {
         return backup;
     }
 
-    static int badlionObjectStart(String text) {
-        int key = text.indexOf("\"badlion\"");
-        if (key < 0) throw new IllegalArgumentException("No badlion section");
-        int brace = text.indexOf('{', key);
-        if (brace < 0) throw new IllegalArgumentException("Malformed badlion section");
-        return brace;
+    /// Opening brace of root.settings.badlion, by structure rather than first "badlion" text.
+    private static int badlionObjectStart(String text) {
+        final int root = text.indexOf('{');
+        if (root < 0) {
+            throw new IllegalArgumentException("Settings root is not an object");
+        }
+        return objectValueStart(text, objectValueStart(text, root, "\"settings\""), "\"badlion\"");
+    }
+
+    private static int objectValueStart(String text, int open, String key) {
+        final int at = indexOfKey(text, key, open + 1, objectEnd(text, open));
+        if (at < 0) {
+            throw new IllegalArgumentException("No " + key + " section");
+        }
+
+        int value = text.indexOf(':', at + key.length()) + 1;
+        while (value < text.length() && " \t\r\n".indexOf(text.charAt(value)) >= 0) {
+            value++;
+        }
+
+        if (value >= text.length() || text.charAt(value) != '{') {
+            throw new IllegalArgumentException("Malformed " + key + " section");
+        }
+        return value;
     }
 
     static int objectEnd(String text, int open) {
@@ -111,8 +135,9 @@ public final class LunarSettings {
         String literal = '"' + escape(newValue) + '"';
         if (key < 0) {
             // Insert right after the opening brace, preserving the file's indentation style.
-            String indent = detectIndent(text, start);
-            return text.substring(0, start + 1) + "\n" + indent + "\"javaPath\": " + literal + ","
+            final String indent = detectIndent(text, start);
+            final boolean empty = text.substring(start + 1, end).trim().isEmpty();
+            return text.substring(0, start + 1) + "\n" + indent + "\"javaPath\": " + literal + (empty ? "" : ",")
                     + text.substring(start + 1);
         }
         int colon = text.indexOf(':', key);

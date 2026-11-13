@@ -25,10 +25,11 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.ProtectionDomain;
 import java.util.*;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentMap;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 
 public class AgentBootstrap {
 
@@ -36,7 +37,6 @@ public class AgentBootstrap {
     private static final String JAR_PATHS_PROPERTY = "lunar.agent.bootstrap.jar.paths";
     private static final String BOOTSTRAPPED_PROPERTY = "lunar.agent.bootstrap.initialized";
     private static final String FORGE_MOD_DESC     = "Lnet/minecraftforge/fml/common/Mod;";
-    private static final List<JarFile> SYSTEM_LOADER_JARS = new CopyOnWriteArrayList<>();
 
     public static void premain(String args, Instrumentation inst) throws Exception {
         // A child-scoped JAVA_TOOL_OPTIONS agent and the launcher's own JVM field
@@ -140,39 +140,80 @@ public class AgentBootstrap {
         inst.addTransformer(new AccessorConflictPatcher(modClassNames, accessorRenames), true);
         AgentLog.log("Transformers registered.");
 
+        final Path mixinPatchDir = createMixinPatchDir();
         for (ModEntry mod : mods) {
             if (mod.getAsm() == null || mod.getAsm().isEmpty()) {
                 continue;
             }
-            registerAsm(inst, mod, mappings, runtimeEnvironment, modClassNames);
+            registerAsm(inst, mod, mappings, runtimeEnvironment, modClassNames, hasMixinConfig(mod) ? mixinPatchDir : null);
         }
 
         BadlionFinalStage.setInstrumentation(inst);
         BadlionFinalStage.install();
         BadlionBootstrapFallback.start(inst, mappings, runtimeEnvironment);
 
-        Thread mixinRegistrar = createMixinRegistrar(inst, agentJar, mods);
+        Thread mixinRegistrar = createMixinRegistrar(inst, agentJar, mods, mixinPatchDir, mappings, runtimeEnvironment, modClassNames, accessorRenames);
         mixinRegistrar.start();
     }
 
-    private static Thread createMixinRegistrar(Instrumentation inst, File agentJar, List<ModEntry> mods) {
+    private static Path createMixinPatchDir() {
+        try {
+            final Path dir = Files.createTempDirectory("agent-mixin-patch-");
+            // Pre-patched mixins classes live in package subdirectories which deleteOnExit can't remove while non-empty.
+            // So we remove the whole tree deepest-first instead.
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                try (Stream<Path> paths = Files.walk(dir)) {
+                    paths.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
+                } catch (IOException ignored) {}
+            }));
+            return dir;
+        } catch (IOException e) {
+            AgentLog.log("Failed to create mixin pre-patch dir: " + e);
+            return null;
+        }
+    }
+
+    private static boolean hasMixinConfig(ModEntry mod) {
+        return mod.getMixin() != null && !mod.getMixin().trim().isEmpty();
+    }
+
+    /// Lunar starts 2 mixin runtimes, META_MIXIN and MIXIN.
+    /// META_MIXIN: Comes up first and only transforms their own mixin classes.
+    /// MIXIN (owned by GenesisClassLoader): Transforms the game.
+    /// We wait for the game (MIXIN) one, otherwise we just register mods where game classes
+    /// never pass through and nothing would load.
+    private static ClassLoader waitForGameMixinLoader(Instrumentation inst) throws InterruptedException {
+        ClassLoader metaLoader = null;
+        long metaSeen = 0L;
+
+        while (true) {
+            for (Class<?> c : inst.getAllLoadedClasses()) {
+                if (!"org.spongepowered.asm.mixin.MixinEnvironment".equals(c.getName())) continue;
+                final ClassLoader loader = c.getClassLoader();
+                if (loader == null) continue;
+                if (!String.valueOf(loader).contains("META_MIXIN")) return loader;
+                if (metaLoader == null) {
+                    metaLoader = loader;
+                    metaSeen = System.currentTimeMillis();
+                    AgentLog.log("Skipping meta Mixin runtime " + loader + ", waiting for the game runtime...");
+                }
+            }
+
+            if (metaLoader != null && System.currentTimeMillis() - metaSeen > 30_000L) {
+                AgentLog.log("No game Mixin runtime appeared, falling back to " + metaLoader);
+                return metaLoader;
+            }
+            Thread.sleep(50);
+        }
+    }
+
+    private static Thread createMixinRegistrar(Instrumentation inst, File agentJar, List<ModEntry> mods, Path patchDir, MappingRegistry mappings,
+                                               AtomicReference<Environment> runtimeEnvironment, Set<String> modClassNames, Map<String, String> accessorRenames) {
         Thread mixinRegistrar = new Thread(() -> {
             try {
                 AgentLog.log("Waiting for MixinEnvironment...");
-                ClassLoader mixinLoader = null;
-
-                do {
-                    Thread.sleep(50);
-                    for (Class<?> c : inst.getAllLoadedClasses()) {
-                        if (c.getName().equals("org.spongepowered.asm.mixin.MixinEnvironment")
-                                && c.getClassLoader() != null) {
-                            mixinLoader = c.getClassLoader();
-                            break;
-                        }
-                    }
-                } while (mixinLoader == null);
-
-                AgentLog.log("Found Mixin loader: " + mixinLoader.getClass().getName());
+                final ClassLoader mixinLoader = waitForGameMixinLoader(inst);
+                AgentLog.log("Found Mixin loader: " + mixinLoader);
 
                 // TODO: This will likely break if the loader doesn't expose it. We might need to fix this later, with a java 1.8 compatible fix.
                 Method addURL;
@@ -184,28 +225,58 @@ public class AgentBootstrap {
                 }
                 Class<?> mixins  = Class.forName("org.spongepowered.asm.mixin.Mixins", true, mixinLoader);
                 Method addConfig = mixins.getMethod("addConfiguration", String.class);
-                Path patchDir = Files.createTempDirectory("agent-mixin-patch-");
-                patchDir.toFile().deleteOnExit();
-                try (JarFile agentJf = new JarFile(agentJar)) {
-                    JarEntry e = agentJf.getJarEntry("mixins.agent.json");
-                    if (e != null) {
-                        try (InputStream is = agentJf.getInputStream(e)) {
-                            String json = new String(toByteArray(is), StandardCharsets.UTF_8);
-                            String patched = stripRefmapField(json);
-                            Files.write(patchDir.resolve("mixins.agent.json"), patched.getBytes(StandardCharsets.UTF_8));
+
+                final Map<String, byte[]> patchedClasses = new HashMap<>();
+                if (patchDir != null) {
+                    for (ModEntry mod : mods) {
+                        if (hasMixinConfig(mod)) {
+                            prePatchMixinMod(mod, patchDir, mappings, runtimeEnvironment.get(), modClassNames, accessorRenames, mixinLoader, patchedClasses);
                         }
                     }
-                } catch (Exception ignored) {}
-                addURL.invoke(mixinLoader, patchDir.toUri().toURL());
-                AgentLog.log("Pre-patch dir added first to IchorClassLoader: " + patchDir);
+                    try (JarFile agentJf = new JarFile(agentJar)) {
+                        JarEntry e = agentJf.getJarEntry("mixins.agent.json");
+                        if (e != null) {
+                            try (InputStream is = agentJf.getInputStream(e)) {
+                                String json = new String(toByteArray(is), StandardCharsets.UTF_8);
+                                writePatchFile(patchDir, "mixins.agent.json", stripRefmapField(json).getBytes(StandardCharsets.UTF_8));
+                            }
+                        }
+                    } catch (Exception ignored) {}
+
+                    // The pre-patch dir must go before the mod jar so Mixin reads the patched copies.
+                    addURL.invoke(mixinLoader, patchDir.toUri().toURL());
+                    AgentLog.log("Pre-patch dir added first to " + mixinLoader + ": " + patchDir);
+                }
                 addURL.invoke(mixinLoader, agentJar.toURI().toURL()); // TODO: This might not work properly on some java versions
-                AgentLog.log("Agent JAR added to IchorClassLoader.");
+                AgentLog.log("Agent JAR added to " + mixinLoader);
+
+                // Mixin resolves the config json and mixin classes as resources of its own loader,
+                // so the mod JAR has to be visible there or the config is not found.
+                for (ModEntry mod : mods) {
+                    if (!hasMixinConfig(mod)) continue;
+                    final File jarFile = new File(mod.getJar());
+                    if (!jarFile.isFile()) {
+                        AgentLog.log("Mixin mod JAR not found, skipping: " + mod.getJar());
+                        continue;
+                    }
+                    addURL.invoke(mixinLoader, jarFile.toURI().toURL());
+                    AgentLog.log("Mod JAR added to " + mixinLoader + ": " + jarFile.getName());
+                }
+
+                // An ASM entry for the same jar may have already preloaded the unpatched bytes.
+                if (!patchedClasses.isEmpty() && isGenesisLoader(mixinLoader)) {
+                    replaceGenesisClassCache(mixinLoader, patchedClasses);
+                }
 
                 /// Mixins.
                 for (ModEntry mod : mods) {
-                    if (mod.getMixin() != null && !mod.getMixin().isEmpty()) {
+                    if (!hasMixinConfig(mod)) continue;
+                    if (!new File(mod.getJar()).isFile()) continue;
+                    try {
                         addConfig.invoke(null, mod.getMixin());
                         AgentLog.log("Mixin config registered: " + mod.getMixin());
+                    } catch (InvocationTargetException e) {
+                        AgentLog.log("Failed to register mixin config " + mod.getMixin() + ": " + e.getCause());
                     }
                 }
             } catch (Exception e) {
@@ -217,7 +288,60 @@ public class AgentBootstrap {
         return mixinRegistrar;
     }
 
-    // TODO: umm I might have broken this idk why it has no usages now and too lazy to check rn - tatp :3
+    /// Mixin reads mixin classes and its config with getResourceAsStream, so ClassFileTransformers never see them.
+    /// The remap, accessor & annotation passes run here, and the config loses its refmap since Ichor refuses
+    /// to serve any resource named like one.
+    private static void prePatchMixinMod(ModEntry mod, Path patchDir, MappingRegistry mappings, Environment environment, Set<String> modClassNames,
+                                         Map<String, String> accessorRenames, ClassLoader mixinLoader, Map<String, byte[]> patchedClasses) {
+        final File jarFile = new File(mod.getJar());
+        if (!jarFile.isFile()) return;
+
+        try (JarFile jf = new JarFile(jarFile)) {
+            final JarEntry jsonEntry = jf.getJarEntry(mod.getMixin());
+            if (jsonEntry == null) {
+                AgentLog.log("Mixin config not found in JAR: " + mod.getMixin() + " (" + jarFile.getName() + ")");
+                return;
+            }
+
+            try (InputStream is = jf.getInputStream(jsonEntry)) {
+                final String json = new String(toByteArray(is), StandardCharsets.UTF_8);
+                writePatchFile(patchDir, mod.getMixin(), stripRefmapField(json).getBytes(StandardCharsets.UTF_8));
+                AgentLog.log("Stripped refmap from mixin config: " + mod.getMixin());
+            }
+
+            // Accessor interfaces are not mixin-listed classes, but Mixin reads them the same way.
+            // Unpatched, their implementations would miss the required accessor renames.
+            final Set<String> classPaths = new LinkedHashSet<>(resolveMixinClassPaths(jf, mod.getMixin()));
+            for (String renameKey : accessorRenames.keySet()) {
+                final String owner = renameKey.substring(0, renameKey.indexOf('\n'));
+                if (modClassNames.contains(owner)) {
+                    classPaths.add(owner + ".class");
+                }
+            }
+
+            for (String classPath : classPaths) {
+                final JarEntry classEntry = jf.getJarEntry(classPath);
+                if (classEntry == null) continue;
+                try (InputStream is = jf.getInputStream(classEntry)) {
+                    final byte[] processed = prePatchMixinClass(toByteArray(is), mappings, environment, modClassNames, accessorRenames, mixinLoader);
+                    writePatchFile(patchDir, classPath, processed);
+                    patchedClasses.put(classPath.substring(0, classPath.length() - 6).replace('/', '.'), processed);
+                } catch (Exception e) {
+                    AgentLog.log("Failed to pre-patch mixin class " + classPath + ": " + e);
+                }
+            }
+            AgentLog.log("Pre-patched " + classPaths.size() + " mixin classes for " + mod.getMixin());
+        } catch (IOException e) {
+            AgentLog.log("Failed to pre-patch mixin mod: " + mod.getJar() + " -- " + e);
+        }
+    }
+
+    private static void writePatchFile(Path patchDir, String relativePath, byte[] bytes) throws IOException {
+        final Path out = patchDir.resolve(relativePath);
+        if (out.getParent() != null) Files.createDirectories(out.getParent());
+        Files.write(out, bytes);
+    }
+
     private static byte[] prePatchMixinClass(byte[] bytes,
                                              MappingRegistry mappings,
                                              Environment runtimeEnvironment,
@@ -715,7 +839,7 @@ public class AgentBootstrap {
 
     private static void registerAsm(Instrumentation inst, ModEntry mod, MappingRegistry mappings,
                                     AtomicReference<Environment> runtimeEnvironment,
-                                    Set<String> modClassNames) {
+                                    Set<String> modClassNames, Path mixinPatchDir) {
         final String asmClassName = mod.getAsm();
         final File modJarFile = new File(mod.getJar());
 
@@ -766,10 +890,18 @@ public class AgentBootstrap {
                             final ClassLoader hookLoader = ichorLoader
                                     && isGenesisLoader(loader.getParent())
                                     ? loader.getParent() : loader;
+
+                            // This usually runs before the mixin registrar. The pre-patched mixin classes
+                            // must still win over this jar's originals, so their dir goes first.
+                            if (mixinPatchDir != null) {
+                                addJarToClassLoader(hookLoader, mixinPatchDir.toFile());
+                            }
+
                             addJarToClassLoader(hookLoader, modJarFile);
                             if (isGenesisLoader(hookLoader)) {
-                                preloadGenesisClassCache(hookLoader, modJarFile);
+                                preloadGenesisClassCache(hookLoader, modJarFile, mixinPatchDir);
                             }
+
                             preparedLoaders.add(loader);
                             AgentLog.log("ASM prepared target loader " + loader
                                     + " with hook owner loader " + hookLoader);
@@ -921,22 +1053,33 @@ public class AgentBootstrap {
     }
 
     @SuppressWarnings("unchecked")
-    private static void preloadGenesisClassCache(ClassLoader loader, File jarFile) throws Exception {
-        Method cacheAccessor = null;
+    private static ConcurrentMap<String, byte[]> genesisClassCache(ClassLoader loader) throws Exception {
         for (Method method : loader.getClass().getMethods()) {
-            if (method.getParameterCount() == 0
-                    && java.util.concurrent.ConcurrentMap.class.isAssignableFrom(method.getReturnType())) {
-                cacheAccessor = method;
-                break;
+            if (method.getParameterCount() == 0 && ConcurrentMap.class.isAssignableFrom(method.getReturnType())) {
+                return (ConcurrentMap<String, byte[]>) method.invoke(loader);
             }
         }
+        throw new IllegalStateException("Genesis class byte cache accessor was not found");
+    }
 
-        if (cacheAccessor == null) {
-            throw new IllegalStateException("Genesis class byte cache accessor was not found");
+    /// Only entries that are already cached are replaced, anything else keeps loading from the patch dir.
+    private static void replaceGenesisClassCache(ClassLoader loader, Map<String, byte[]> patched) {
+        try {
+            final ConcurrentMap<String, byte[]> classCache = genesisClassCache(loader);
+
+            int replaced = 0;
+            for (Map.Entry<String, byte[]> entry : patched.entrySet()) {
+                if (classCache.replace(entry.getKey(), entry.getValue()) != null) replaced++;
+            }
+
+            if (replaced > 0) AgentLog.log("Replaced " + replaced + " cached mixin classes with pre-patched bytes.");
+        } catch (Exception e) {
+            AgentLog.log("Failed to update Genesis byte cache with pre-patched mixins: " + e);
         }
+    }
 
-        final java.util.concurrent.ConcurrentMap<String, byte[]> classCache =
-                (java.util.concurrent.ConcurrentMap<String, byte[]>) cacheAccessor.invoke(loader);
+    private static void preloadGenesisClassCache(ClassLoader loader, File jarFile, Path mixinPatchDir) throws Exception {
+        final ConcurrentMap<String, byte[]> classCache = genesisClassCache(loader);
         int added = 0;
 
         try (JarFile jar = new JarFile(jarFile)) {
@@ -951,7 +1094,10 @@ public class AgentBootstrap {
 
                 final String className = entryName.substring(0, entryName.length() - 6)
                         .replace('/', '.');
-                try (InputStream input = jar.getInputStream(entry)) {
+                // Prefer the mixin registrars patched copy.
+                final Path patched = mixinPatchDir != null ? mixinPatchDir.resolve(entryName) : null;
+                try (InputStream input = patched != null && Files.isRegularFile(patched)
+                        ? Files.newInputStream(patched) : jar.getInputStream(entry)) {
                     if (classCache.putIfAbsent(className, toByteArray(input)) == null) {
                         added++;
                     }
@@ -982,26 +1128,5 @@ public class AgentBootstrap {
         }
 
         throw new IllegalStateException("Target classloader cannot accept URLs: " + loader.getClass().getName());
-    }
-
-    private static void appendToSystemClassLoader(Instrumentation instrumentation, File jarFile) throws IOException {
-        if (!jarFile.isFile()) {
-            throw new FileNotFoundException("JAR does not exist: " + jarFile.getAbsolutePath());
-        }
-
-        final JarFile jar = new JarFile(jarFile);
-        boolean appended = false;
-
-        try {
-            instrumentation.appendToSystemClassLoaderSearch(jar);
-            SYSTEM_LOADER_JARS.add(jar);
-            appended = true;
-
-            AgentLog.log("Appended JAR to system class loader search: " + jarFile.getAbsolutePath());
-        } finally {
-            if (!appended) {
-                jar.close();
-            }
-        }
     }
 }

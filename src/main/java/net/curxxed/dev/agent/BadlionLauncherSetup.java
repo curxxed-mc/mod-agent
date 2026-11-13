@@ -14,7 +14,10 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Installs a Java launcher for Lunar's Badlion "Java path" setting; never edits launcher settings. */
+/**
+ * Installs a java launcher for Lunar's Badlion "Java path" setting. The only launcher setting it edits
+ * is settings.badlion.javaPath.
+ */
 public final class BadlionLauncherSetup {
     private BadlionLauncherSetup() {}
 
@@ -107,10 +110,64 @@ public final class BadlionLauncherSetup {
                 }
             }
         }
+
+        Path configured = configuredRuntime();
+        if (configured != null) return configured;
         if (found.size() == 1) return found.get(0);
-        throw new IllegalArgumentException((found.isEmpty() ? "Could not find Badlion's Java runtime"
-                : "Found several Badlion Java runtimes " + found)
-                + ". Pass --runtime <the bin directory containing " + java + ">.");
+
+        // Badlion keeps every runtime it ever downloaded, take the newest update.
+        Path newest = null;
+        int newestUpdate = -1;
+        for (Path bin : found) {
+            int update = java8Update(bin);
+            if (update > newestUpdate) {
+                newest = bin;
+                newestUpdate = update;
+            }
+        }
+
+        if (newest != null) {
+            return newest;
+        } else {
+            final String message = found.isEmpty() ? "Unable to find Badlion's Java runtime" : "Found no Badlion Java 8 runtime: " + found;
+            throw new IllegalArgumentException(message + ". Pass --runtime <bin directory containing " + java + ">");
+        }
+    }
+
+    /// Lunar's current Badlion Java path when it names a real runtime, or the one our launcher already wraps.
+    private static Path configuredRuntime() {
+        final String java = windows() ? "java.exe" : "java";
+        try {
+            final String value = LunarSettings.currentJavaPath();
+            if (value == null || value.trim().isEmpty()) return null;
+
+            Path bin = Paths.get(value.trim());
+            if (Files.isRegularFile(bin)) bin = bin.getParent();
+
+            final Path conf = bin.resolve("java.conf");
+            if (Files.isRegularFile(conf)) {
+                for (String line : Files.readAllLines(conf, StandardCharsets.UTF_8)) {
+                    if (line.startsWith("runtime=")) bin = Paths.get(line.substring("runtime=".length()).trim());
+                }
+            }
+
+            return Files.isRegularFile(bin.resolve(java)) && !Files.exists(bin.resolve("java.conf")) ? bin : null;
+        } catch (IOException | RuntimeException unreadable) {
+            return null; // Scan Badlion's own runtimes as fallback
+        }
+    }
+
+    /// Update number of a Java 8 runtime for its release file. Example "1.8.0_202 gives 202" gives 202.
+    /// @return -1 if not Java 8.
+    private static int java8Update(Path bin) {
+        try {
+            for (String line : Files.readAllLines(bin.getParent().resolve("release"), StandardCharsets.UTF_8)) {
+                if (!line.startsWith("JAVA_VERSION=\"1.8.0_")) continue;
+                final String digits = line.substring("JAVA_VERSION=\"1.8.0_".length()).replaceAll("[^0-9].*", "");
+                return digits.isEmpty() ? 0 : Integer.parseInt(digits);
+            }
+        } catch (IOException | RuntimeException ignored) {}
+        return -1;
     }
 
     public static Path install(Path runtime, Path output, File agent, File config, List<String> options, Path log)

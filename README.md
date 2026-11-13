@@ -1,4 +1,4 @@
-# lunar-agent
+# mod-agent
 
 > **This project is not a user-friendly tool. It is a low-level JVM instrumentation framework that requires deep knowledge of Minecraft, Mixin, and Lunar/Badlion client internals.**
 > Incorrect use can corrupt game files, cause undiagnosable crashes, or permanently break other mods. No support will be provided for misconfigured setups.
@@ -167,12 +167,12 @@ The transformer runs in its own class loader, while the hook classes your patche
 
 #### Lunar Client
 
-The easiest way: double-click `lunar-agent.jar`, check that **Mod configuration** points at your `agent-mods.json`, and press **Copy JVM argument** under *Lunar (JVM argument)*. Paste the result into Lunar's **Settings → JVM Arguments**. If the agent or config path contains a space (which Lunar can't handle), the agent and config are first copied to a folder without spaces (`C:\lunar-agent` on Windows, `~/.mod-agent/lunar` elsewhere) and the argument points there. Press the button again whenever you change your config or update the agent.
+The easiest way: double-click `Mod-Agent-<version>.jar`. Under **1. Choose your mods**, check that it found your `agent-mods.json` (it shows *Ready: 1 mod (...)* or what is wrong), then under **2. Install into your client** pick **Lunar** and press **Copy JVM argument**. The **Vanilla** tab gives the same argument for the Minecraft Launcher, and **Badlion** runs the setup below. Paste the result into Lunar's **Settings → JVM Arguments**. From a script or installer, `java -jar Mod-Agent-<version>.jar lunar-argument --config agent-mods.json` prints the same argument as its last output line. If the agent or config path contains a space (which Lunar can't handle), the agent and config are first copied to a folder without spaces (`C:\mod-agent` on Windows, `~/.mod-agent/lunar` elsewhere) and the argument points there. That folder is restricted to your account so other accounts on the PC can't replace the agent; if it already exists and belongs to another account, the button refuses to use it. Press the button again whenever you change your config or update the agent.
 
 To write it by hand instead, go to **Settings → JVM Arguments** and add:
 
 ```
--javaagent:C:\Users\<User>\Documents\lunar-agent\lunar-agent.jar=C:\Users\<User>\Documents\lunar-agent\agent-mods.json
+-javaagent:C:\Users\<User>\Documents\mod-agent\Mod-Agent-1.0.0.jar=C:\Users\<User>\Documents\mod-agent\agent-mods.json
 ```
 
 Replace both paths with wherever you placed the files.
@@ -185,24 +185,26 @@ The JVM Arguments field doesn't work for Badlion (Lunar only passes `-Xmx` to it
 
 1. In Lunar's settings, turn on **Use Badlion Services**, then launch Badlion once so Lunar downloads Badlion's Java runtime.
 2. Fully quit Lunar, including the tray icon. Lunar rewrites its settings when it closes and would undo the next step.
-3. Double-click `lunar-agent.jar` and press **Set up Badlion**, or run:
+3. Double-click `Mod-Agent-<version>.jar` and press **Set up Badlion**, or run:
 
    ```
-   java -jar lunar-agent.jar setup-badlion --config agent-mods.json
+   java -jar Mod-Agent-<version>.jar setup-badlion --config agent-mods.json
    ```
 
-4. Launch Badlion from Lunar as usual. In `mod-agent.log` (next to the agent JAR), `JVM agent load order` should list `javaagent:lunar-agent.jar` after Badlion's `agentpath:` entry, followed by `Badlion final stage enabled`.
+4. Launch Badlion from Lunar as usual. In `mod-agent.log` (next to the agent JAR), `JVM agent load order` should list `javaagent:Mod-Agent-<version>.jar` after Badlion's `agentpath:` entry, followed by `Badlion final stage enabled`.
 
-Setup finds Badlion's Java runtime, installs the launcher in `~/.mod-agent/badlion-runtime`, and points Lunar's Badlion Java path (`settings.badlion.javaPath` in `launcher.json`) at it. It backs up `launcher.json` first and changes nothing else. On Linux and macOS the launcher is a bash script; on Windows it is compiled from C# by the .NET Framework compiler that ships with Windows 10/11.
+Setup finds Badlion's Java runtime (Badlion keeps every runtime it has downloaded; setup uses the one Lunar's Badlion Java path already names, otherwise the newest Java 8, and shows which), installs the launcher in `~/.mod-agent/badlion-runtime`, and points Lunar's Badlion Java path (`settings.badlion.javaPath` in `launcher.json`) at it. It backs up `launcher.json` first and changes nothing else. On Linux and macOS the launcher is a bash script; on Windows it is compiled from C# by the .NET Framework compiler that ships with Windows 10/11.
 
-To undo, press **Undo** or run `java -jar lunar-agent.jar setup-badlion --restore`, then delete `~/.mod-agent/badlion-runtime`.
+To undo, press **Undo** or run `java -jar Mod-Agent-<version>.jar setup-badlion --restore`, then delete `~/.mod-agent/badlion-runtime`.
+
+On failure, every command prints one `Error: <reason>` line and exits with status 1, so installers can show the reason directly.
 
 `setup-badlion` options:
 
 | Option | Description |
 |---|---|
 | `--config <file>` | Your `agent-mods.json` (defaults to one found next to the agent JAR). |
-| `--runtime <dir>` | Badlion's Java `bin` directory, if it isn't found automatically. |
+| `--runtime <dir>` | Badlion's Java `bin` directory, if it isn't found automatically or you want a different one than setup picks. |
 | `--output <dir>` | Where to install the launcher (default `~/.mod-agent/badlion-runtime`). |
 | `--vm-option -D...` | Extra system property for the game; repeatable. |
 | `--log <file>` | Launcher log file (default `<output>/launcher.log`). |
@@ -242,7 +244,7 @@ You do not need to do any of the following in your mod source:
 
 **Mixin conflicts with Lunar** — Switch from `@Overwrite` to `@Inject` or `@Redirect` (although not always).
 
-**Game won't start: `Error opening zip file or JAR manifest missing : C:\Users\my`** — A path in your JVM argument contains a space (e.g. a Windows username like `my name`). Lunar splits the JVM Arguments field on every space and doesn't support quotes, so `-javaagent:C:\Users\my name\lunar-agent.jar=...` reaches Java cut off at the space, and adding quotes doesn't help. Press **Copy JVM argument** in the agent's window, which copies the agent and config to a folder without spaces and gives you a working argument. Or move `lunar-agent.jar` and `agent-mods.json` to a folder without spaces anywhere in its path, such as `C:\lunar-agent\`, and update the JVM argument yourself. Paths *inside* `agent-mods.json` may contain spaces. Badlion setup (`setup-badlion`) is not affected.
+**Game won't start: `Error opening zip file or JAR manifest missing : C:\Users\my`** — A path in your JVM argument contains a space (e.g. a Windows username like `my name`). Lunar splits the JVM Arguments field on every space and doesn't support quotes, so `-javaagent:C:\Users\my name\Mod-Agent-1.0.0.jar=...` reaches Java cut off at the space, and adding quotes doesn't help. Press **Copy JVM argument** in the agent's window, which copies the agent and config to a folder without spaces and gives you a working argument. Or move `Mod-Agent-<version>.jar` and `agent-mods.json` to a folder without spaces anywhere in its path, such as `C:\mod-agent\`, and update the JVM argument yourself. Paths *inside* `agent-mods.json` may contain spaces. Badlion setup (`setup-badlion`) is not affected.
 
 **`agent library failed to init` on startup** — If it's preceded by `Error opening zip file`, see the entry above. Otherwise you used `./gradlew jar` instead of `./gradlew shadowJar`. Always use `shadowJar`.
 
@@ -251,6 +253,8 @@ You do not need to do any of the following in your mod source:
 **Badlion isn't listed in Lunar** — Badlion is opt-in. Turn on **Use Badlion Services** in Lunar's settings (enable Advanced Settings if you can't see it).
 
 **`Could not find Badlion's Java runtime`** — Launch Badlion once from Lunar so its Java runtime gets downloaded, or pass `--runtime` with the `bin` directory that contains its `java`/`java.exe`.
+
+**Setup picked the wrong Java** — With several runtimes, setup uses Lunar's existing Badlion Java path if set, otherwise the newest Java 8 under Badlion's `Data` folder (for example `jre1.8.0_202` over `jre1.8.0_51_…`). To use another one, run `setup-badlion --runtime "<Badlion Data>\<jre folder>\bin"`.
 
 **`The .NET Framework 4 C# compiler (csc.exe) was not found`** (Windows) — It ships with Windows 10/11 but can be removed. Enable **.NET Framework 4.8** in *Turn Windows features on or off*, then run setup again.
 

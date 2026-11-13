@@ -8,11 +8,20 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /** Client-thread startup fallback for Badlion's native-modified startup path. */
 public final class BadlionBootstrapFallback {
-    private static final String MINECRAFT = "net/minecraft/client/Minecraft";
 
-    static boolean isBadlionLaunch(String command) {
-        return command.equals("net.badlion.clientcommon.main.Launch")
-                || command.startsWith("net.badlion.clientcommon.main.Launch ");
+    private static final String MINECRAFT = "net/minecraft/client/Minecraft";
+    private static final String BADLION_LAUNCH = "net.badlion.clientcommon.main.Launch";
+    private static volatile Boolean badlionOnClasspath;
+
+    /// Badlion starts net.minecraft.client.main.Main from BLClient.jar, which then loads Launch.
+    public static boolean isBadlionLaunch(String command) {
+        if (command.equals(BADLION_LAUNCH) || command.startsWith(BADLION_LAUNCH + " ")) return true;
+        Boolean present = badlionOnClasspath;
+        if (present == null) {
+            present = ClassLoader.getSystemResource(BADLION_LAUNCH.replace('.', '/') + ".class") != null;
+            badlionOnClasspath = present;
+        }
+        return present;
     }
 
     public static void start(Instrumentation instrumentation, MappingRegistry mappings,

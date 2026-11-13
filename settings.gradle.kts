@@ -1,1 +1,1 @@
-rootProject.name = "lunar-agent"
+rootProject.name = "mod-agent"

@@ -725,15 +725,14 @@ public class MappingRegistry {
                                 ? ownerMapping.name(namespace)
                                 : owner;
 
+                String namespaceDesc =
+                        descriptor != null
+                                ? remapDescriptor(descriptor, namespace)
+                                : null;
+
                 while (currentOwner != null) {
 
-                    if (descriptor != null) {
-
-                        String namespaceDesc =
-                                remapDescriptor(
-                                        descriptor,
-                                        namespace
-                                );
+                    if (namespaceDesc != null) {
 
                         MethodMapping mapping =
                                 methodsByKey.get(namespace).get(
@@ -758,7 +757,10 @@ public class MappingRegistry {
                                             )
                                     );
 
-                    if (mapping != null) {
+                    if (mapping != null
+                            && (namespaceDesc == null
+                            || mapping.desc(namespace).isEmpty()
+                            || mapping.desc(namespace).equals(namespaceDesc))) {
                         return mapping;
                     }
 

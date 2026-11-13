@@ -22,9 +22,9 @@ public final class AgentLog {
 
     static {
         Path selected = null;
+        final String override = System.getProperty("modagent.log.file", "");
         try {
             final Path jarDir = Paths.get(AgentLog.class.getProtectionDomain().getCodeSource().getLocation().toURI()).getParent();
-            String override = System.getProperty("modagent.log.file", "");
             Path besideJar = jarDir.resolve("mod-agent.log");
             selected = !override.isEmpty() ? Paths.get(override).toAbsolutePath()
                     : jarDir.toFile().canWrite() && (!Files.exists(besideJar) || besideJar.toFile().canWrite())
@@ -33,7 +33,8 @@ public final class AgentLog {
             System.err.println("[Mod-Agent] Cannot select log file; console logging remains available: " + e);
         }
         LOG_FILE = selected;
-        if (LOG_FILE != null) {
+        // Only reset our own default log.
+        if (LOG_FILE != null && override.isEmpty()) {
             try { Files.deleteIfExists(LOG_FILE); }
             catch (IOException failure) {
                 System.err.println("[Mod-Agent] Cannot reset log file; will attempt append: " + failure);
@@ -79,20 +80,7 @@ public final class AgentLog {
 
     public static synchronized void log(String message, Throwable t) {
         log(message);
-
-        try {
-            t.printStackTrace(System.out);
-            System.out.flush();
-        } catch (Throwable ignored) {}
-
-        try {
-            Files.write(
-                    LOG_FILE,
-                    (stackTraceToString(t) + System.lineSeparator()).getBytes(),
-                    StandardOpenOption.CREATE,
-                    StandardOpenOption.APPEND
-            );
-        } catch (IOException ignored) {}
+        log(stackTraceToString(t));
     }
 
     private static String stackTraceToString(Throwable t) {
@@ -100,6 +88,6 @@ public final class AgentLog {
         final PrintWriter printWriter = new PrintWriter(stringWriter);
         t.printStackTrace(printWriter);
         printWriter.flush();
-        return printWriter.toString();
+        return stringWriter.toString();
     }
 }
