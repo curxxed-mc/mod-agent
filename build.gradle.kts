@@ -28,7 +28,7 @@ tasks.jar {
 
 tasks.shadowJar {
     archiveClassifier.set("")
-    archiveFileName.set(providers.gradleProperty("agentJarName").orElse("Mod-Agent.jar"))
+    archiveFileName.set(providers.gradleProperty("agentJarName").orElse("Mod-Agent-${project.version}.jar"))
 
     // Relocate so we don't collide with other ASM versions
     relocate("org.objectweb.asm", "dev.curxxed.agent.asm")

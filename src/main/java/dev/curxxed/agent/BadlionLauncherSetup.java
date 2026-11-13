@@ -157,7 +157,7 @@ public final class BadlionLauncherSetup {
         }
     }
 
-    /// Update number of a Java 8 runtime for its release file. Example "1.8.0_202 gives 202" gives 202.
+    /// Update number of a Java 8 runtime for its release file. For example "1.8.0_202" gives 202.
     /// @return -1 if not Java 8.
     private static int java8Update(Path bin) {
         try {

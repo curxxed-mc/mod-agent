@@ -121,8 +121,10 @@ public final class AgentWindow {
         final ClientPanel panel = new ClientPanel(
                 "Paste the argument into Lunar under Settings -> JVM Arguments. Turn on Advanced Settings if you can't see that field.");
         final Button copy = panel.button("Copy JVM argument", true);
-        copy.addActionListener(event -> panel.work(window,
-                () -> copyArgument(agent, config, panel) + " Paste it into Lunar, then launch 1.8.9.", copy));
+        copy.addActionListener(event -> {
+            final String configPath = config.getText(); // Read on the UI thread, Swing isn't thread-safe.
+            panel.work(window, () -> copyArgument(agent, configPath, panel) + " Paste it into Lunar, then launch 1.8.9.", copy);
+        });
         return panel;
     }
 
@@ -133,13 +135,16 @@ public final class AgentWindow {
         final Button install = panel.button("Set up Badlion", true);
         final Button undo = panel.button("Undo", false);
         final Path output = Paths.get(System.getProperty("user.home"), ".mod-agent", "badlion-runtime");
-        install.addActionListener(event -> panel.work(window, () -> {
-            final Path runtime = BadlionLauncherSetup.detectRuntime();
-            final Path bin = BadlionLauncherSetup.install(runtime, output, agent, configFile(config),
-                    Collections.emptyList(), output.resolve("launcher.log"));
-            BadlionLauncherSetup.wireSettings(output, bin);
-            return "Done, using Java " + runtime.getParent().getFileName() + ". Launch Badlion from Lunar as usual.";
-        }, install, undo));
+        install.addActionListener(event -> {
+            final String configPath = config.getText(); // Read on the UI thread, Swing isn't thread-safe.
+            panel.work(window, () -> {
+                final Path runtime = BadlionLauncherSetup.detectRuntime();
+                final Path bin = BadlionLauncherSetup.install(runtime, output, agent, configFile(configPath),
+                        Collections.emptyList(), output.resolve("launcher.log"));
+                BadlionLauncherSetup.wireSettings(output, bin);
+                return "Done, using Java " + runtime.getParent().getFileName() + ". Launch Badlion from Lunar as usual.";
+            }, install, undo);
+        });
         undo.addActionListener(event -> panel.work(window, () -> {
             BadlionLauncherSetup.restoreSettings(output);
             return "Lunar's Badlion Java path is restored. You can delete " + output + ".";
@@ -151,13 +156,15 @@ public final class AgentWindow {
         final ClientPanel panel = new ClientPanel(
                 "Add the JVM argument to your current arguments list in the Java Arguments field supplied by your current launcher.");
         final Button copy = panel.button("Copy JVM argument", true);
-        copy.addActionListener(event -> panel.work(window,
-                () -> copyArgument(agent, config, panel) + " Paste it into your installation's JVM arguments.", copy));
+        copy.addActionListener(event -> {
+            final String configPath = config.getText(); // Read on the UI thread, Swing isn't thread-safe.
+            panel.work(window, () -> copyArgument(agent, configPath, panel) + " Paste it into your installation's JVM arguments.", copy);
+        });
         return panel;
     }
 
-    private static String copyArgument(File agent, JTextField config, ClientPanel panel) throws Exception {
-        final LunarJvmArgument.Result result = LunarJvmArgument.prepare(agent, configFile(config), LunarJvmArgument.defaultFolder());
+    private static String copyArgument(File agent, String configPath, ClientPanel panel) throws Exception {
+        final LunarJvmArgument.Result result = LunarJvmArgument.prepare(agent, configFile(configPath), LunarJvmArgument.defaultFolder());
         SwingUtilities.invokeLater(() -> {
             panel.argument.setText(result.argument);
             panel.argument.setCaretPosition(0);
@@ -185,8 +192,7 @@ public final class AgentWindow {
         log.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
         log.addActionListener(event -> {
-            final File beside = new File(agent.getParentFile(), "mod-agent.log");
-            final File file = beside.isFile() ? beside : Paths.get(System.getProperty("user.home"), ".mod-agent", "mod-agent.log").toFile();
+            final File file = newestLog(agent);
             try {
                 if (!file.isFile()) {
                     throw new IllegalStateException("No log yet. Launch the game once first.");
@@ -202,6 +208,22 @@ public final class AgentWindow {
         footer.add(left(row));
         footer.add(left(state));
         return footer;
+    }
+
+    /// The log sits beside whichever agent JAR the game ran: this one, or the no-spaces copy that
+    /// "Copy JVM argument" makes. If that folder isn't writable, it falls back to ~/.mod-agent.
+    /// Of the logs that exist, the most recently written one belongs to the last launch.
+    private static File newestLog(File agent) {
+        final File[] candidates = {
+                new File(agent.getParentFile(), "mod-agent.log"),
+                LunarJvmArgument.defaultFolder().resolve("mod-agent.log").toFile(),
+                Paths.get(System.getProperty("user.home"), ".mod-agent", "mod-agent.log").toFile()
+        };
+        File newest = candidates[0];
+        for (File candidate : candidates) {
+            if (candidate.isFile() && (!newest.isFile() || candidate.lastModified() > newest.lastModified())) newest = candidate;
+        }
+        return newest;
     }
 
     private static final class ClientPanel extends JPanel {
@@ -305,8 +327,8 @@ public final class AgentWindow {
         }
     }
 
-    private static File configFile(JTextField config) {
-        final File file = new File(config.getText().trim());
+    private static File configFile(String configPath) {
+        final File file = new File(configPath.trim());
         if (!file.isFile()) {
             throw new IllegalArgumentException("Choose your agent-mods.json in step 1 first.");
         }

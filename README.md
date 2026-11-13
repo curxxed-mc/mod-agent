@@ -59,7 +59,7 @@ Plain Lunar Client does not ship any Forge classes, so a Forge mod injected ther
 ./gradlew shadowJar
 ```
 
-The shadow plugin shades and relocates ASM so it doesn't conflict with Lunar's own copy. The output `MANIFEST.MF` declares:
+This produces `build/libs/Mod-Agent-<version>.jar` (pass `-PagentJarName=<name>.jar` to change the file name). The shadow plugin shades and relocates ASM so it doesn't conflict with Lunar's own copy. The output `MANIFEST.MF` declares:
 
 ```
 Premain-Class: dev.curxxed.agent.AgentBootstrap
@@ -68,7 +68,7 @@ Can-Redefine-Classes:    true
 Can-Retransform-Classes: true
 ```
 
-This is already configured in `build.gradle.kts`. Don't use `./gradlew jar` — the plain JAR doesn't have ASM shaded in and will crash on startup.
+This is already configured in `build.gradle.kts`. The plain `jar` task is disabled, because a JAR without ASM shaded in crashes on startup.
 
 ### 2. Create your config file
 
@@ -166,7 +166,7 @@ The transformer runs in its own class loader, while the hook classes your patche
 
 #### Lunar Client
 
-The easiest way: double-click `Mod-Agent-<version>.jar`. Under **1. Choose your mods**, check that it found your `agent-mods.json` (it shows *Ready: 1 mod (...)* or what is wrong), then under **2. Install into your client** pick **Lunar** and press **Copy JVM argument**. The **Vanilla** tab gives the same argument for the Minecraft Launcher, and **Badlion** runs the setup below. Paste the result into Lunar's **Settings → JVM Arguments**. From a script or installer, `java -jar Mod-Agent-<version>.jar lunar-argument --config agent-mods.json` prints the same argument as its last output line. If the agent or config path contains a space (which Lunar can't handle), the agent and config are first copied to a folder without spaces (`C:\mod-agent` on Windows, `~/.mod-agent/lunar` elsewhere) and the argument points there. That folder is restricted to your account so other accounts on the PC can't replace the agent; if it already exists and belongs to another account, the button refuses to use it. Press the button again whenever you change your config or update the agent.
+The easiest way: double-click `Mod-Agent-<version>.jar`. Under **1. Select your mods**, check that it found your `agent-mods.json` (it shows *Ready: 1 mod (...)* or what is wrong), then under **2. Install into your client** pick **Lunar** and press **Copy JVM argument**. The **Vanilla** tab gives the same argument for the Minecraft Launcher, and **Badlion** runs the setup below. Paste the result into Lunar's **Settings → JVM Arguments**. From a script or installer, `java -jar Mod-Agent-<version>.jar lunar-argument --config agent-mods.json` prints the same argument as its last output line. If the agent or config path contains a space (which Lunar can't handle), the agent and config are first copied to a folder without spaces (`C:\mod-agent` on Windows, `~/.mod-agent/lunar` elsewhere) and the argument points there. Press the button again whenever you change your config or update the agent.
 
 To write it by hand instead, go to **Settings → JVM Arguments** and add:
 
@@ -245,7 +245,7 @@ You do not need to do any of the following in your mod source:
 
 **Game won't start: `Error opening zip file or JAR manifest missing : C:\Users\my`** — A path in your JVM argument contains a space (e.g. a Windows username like `my name`). Lunar splits the JVM Arguments field on every space and doesn't support quotes, so `-javaagent:C:\Users\my name\Mod-Agent-1.0.0.jar=...` reaches Java cut off at the space, and adding quotes doesn't help. Press **Copy JVM argument** in the agent's window, which copies the agent and config to a folder without spaces and gives you a working argument. Or move `Mod-Agent-<version>.jar` and `agent-mods.json` to a folder without spaces anywhere in its path, such as `C:\mod-agent\`, and update the JVM argument yourself. Paths *inside* `agent-mods.json` may contain spaces. Badlion setup (`setup-badlion`) is not affected.
 
-**`agent library failed to init` on startup** — If it's preceded by `Error opening zip file`, see the entry above. Otherwise you used `./gradlew jar` instead of `./gradlew shadowJar`. Always use `shadowJar`.
+**`agent library failed to init` on startup** — If it's preceded by `Error opening zip file`, see the entry above. Otherwise the JAR wasn't built with `./gradlew shadowJar`, so ASM isn't shaded in. Always use `shadowJar`.
 
 ### Badlion
 
