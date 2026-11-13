@@ -39,6 +39,10 @@ public class AgentBootstrap {
     private static final String FORGE_MOD_DESC     = "Lnet/minecraftforge/fml/common/Mod;";
 
     public static void premain(String args, Instrumentation inst) throws Exception {
+        // Launcher JVM fields keep whatever was pasted, often a trailing newline from a terminal copy,
+        // and Java passes it through as part of the config path.
+        if (args != null) args = args.trim();
+
         // A child-scoped JAVA_TOOL_OPTIONS agent and the launcher's own JVM field
         // can both request this JAR. Never register the same pipeline twice.
         if (args != null && !args.isEmpty()) {
