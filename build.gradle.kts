@@ -3,7 +3,7 @@ plugins {
     id("com.github.johnrengelman.shadow") version "8.1.1"
 }
 
-group = "net.curxxed.dev"
+group = "dev.curxxed"
 version = "1.0.0"
 
 java {
@@ -31,13 +31,13 @@ tasks.shadowJar {
     archiveFileName.set(providers.gradleProperty("agentJarName").orElse("Mod-Agent.jar"))
 
     // Relocate so we don't collide with other ASM versions
-    relocate("org.objectweb.asm", "net.curxxed.dev.agent.asm")
+    relocate("org.objectweb.asm", "dev.curxxed.agent.asm")
 
     manifest {
         attributes(
-            "Premain-Class"           to "net.curxxed.dev.agent.AgentBootstrap",
-            "Agent-Class"             to "net.curxxed.dev.agent.AgentBootstrap",
-            "Main-Class"              to "net.curxxed.dev.agent.AgentLauncher",
+            "Premain-Class"           to "dev.curxxed.agent.AgentBootstrap",
+            "Agent-Class"             to "dev.curxxed.agent.AgentBootstrap",
+            "Main-Class"              to "dev.curxxed.agent.AgentLauncher",
             "Implementation-Version"  to project.version,
             "Can-Retransform-Classes" to "true",
             "Can-Redefine-Classes"    to "true"

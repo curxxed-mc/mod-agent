@@ -63,8 +63,8 @@ Plain Lunar Client does not ship any Forge classes, so a Forge mod injected ther
 The shadow plugin shades and relocates ASM so it doesn't conflict with Lunar's own copy. The output `MANIFEST.MF` declares:
 
 ```
-Premain-Class: net.curxxed.dev.agent.AgentBootstrap
-Agent-Class:   net.curxxed.dev.agent.AgentBootstrap
+Premain-Class: dev.curxxed.agent.AgentBootstrap
+Agent-Class:   dev.curxxed.agent.AgentBootstrap
 Can-Redefine-Classes:    true
 Can-Retransform-Classes: true
 ```
