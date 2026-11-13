@@ -850,7 +850,7 @@ public class AgentBootstrap {
                 asmClassName, modJarFile, ClassLoader.getSystemClassLoader(),
                 runtimeEnvironment.get() == Environment.OBF ? "ave"
                         : runtimeEnvironment.get() == Environment.SRG ? "srg"
-                        : "dev/minecraft/client/Minecraft");
+                        : "net/minecraft/client/Minecraft");
 
         ClassFileTransformer asmTransformer = new ClassFileTransformer() {
             private volatile Method transform = eagerHandle != null ? eagerHandle.transform : null;
@@ -866,7 +866,7 @@ public class AgentBootstrap {
                 if (BadlionTickProbe.isProbeRetransformation(classBeingRedefined)) return null;
 
                 final boolean minecraftEntry = className.equals("ave")
-                        || className.equals("dev/minecraft/client/Minecraft");
+                        || className.equals("net/minecraft/client/Minecraft");
                 // Badlion defines Entity, GuiScreen, Block and others before Minecraft; preparing only
                 // on Minecraft let those base classes bypass the mod's patches for the whole session.
                 final boolean badlionGameClass = BadlionFinalStage.isInstalled()
@@ -919,7 +919,7 @@ public class AgentBootstrap {
                         if (m == null) {
                             final AsmHandle handle = initializeAsmTransformer(
                                     asmClassName, modJarFile, loader,
-                                    className.equals("ave") ? "ave" : "dev/minecraft/client/Minecraft");
+                                    className.equals("ave") ? "ave" : "net/minecraft/client/Minecraft");
                             if (handle == null) {
                                 return null;
                             }

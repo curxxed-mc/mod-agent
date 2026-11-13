@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 public class MinecraftBootstrapTransformer implements ClassFileTransformer {
 
-    private static final String MCP_MINECRAFT = "dev/minecraft/client/Minecraft";
+    private static final String MCP_MINECRAFT = "net/minecraft/client/Minecraft";
 
     private final MappingRegistry mappings;
     private final AtomicReference<Environment> runtimeEnvironment;

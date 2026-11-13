@@ -14,8 +14,8 @@ import org.objectweb.asm.Opcodes;
 final class AsmFailureDiagnostics {
     static List<String> describe(String className, byte[] bytes, MappingRegistry mappings, Environment environment) {
         List<String> report = new ArrayList<>();
-        String minecraft = "dev/minecraft/client/Minecraft";
-        String renderer = "dev/minecraft/client/renderer/EntityRenderer";
+        String minecraft = "net/minecraft/client/Minecraft";
+        String renderer = "net/minecraft/client/renderer/EntityRenderer";
         Set<String> methods = new LinkedHashSet<>();
         if (className.equals(mappings.mapClass(minecraft, environment.namespace()))) {
             methods.add(mappings.mapMethodName(minecraft, "runTick", "()V", environment.namespace()) + "()V");
@@ -39,7 +39,7 @@ final class AsmFailureDiagnostics {
                     public void visitMethodInsn(int opcode, String owner, String member,
                             String calledDescriptor, boolean isInterface) {
                         if (calls.size() < 40) calls.add("L" + owner + ";" + member + calledDescriptor);
-                        if (clientCalls.size() < 40 && (owner.equals(className) || owner.startsWith("dev/badlion/"))) {
+                        if (clientCalls.size() < 40 && (owner.equals(className) || owner.startsWith("net/badlion/"))) {
                             clientCalls.add("L" + owner + ";" + member + calledDescriptor);
                         }
                     }

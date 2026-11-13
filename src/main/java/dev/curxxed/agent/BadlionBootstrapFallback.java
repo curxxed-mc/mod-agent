@@ -9,7 +9,7 @@ import java.util.concurrent.atomic.AtomicReference;
 /** Client-thread startup fallback for Badlion's native-modified startup path. */
 public final class BadlionBootstrapFallback {
 
-    private static final String MINECRAFT = "dev/minecraft/client/Minecraft";
+    private static final String MINECRAFT = "net/minecraft/client/Minecraft";
     private static final String BADLION_LAUNCH = "net.badlion.clientcommon.main.Launch";
     private static volatile Boolean badlionOnClasspath;
 

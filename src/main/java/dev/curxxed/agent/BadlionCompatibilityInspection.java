@@ -32,8 +32,8 @@ final class BadlionCompatibilityInspection {
                 if (name.equals("ave") || name.equals("bfk")) {
                     AgentLog.log("Badlion inspection runtime target " + name);
                     AsmFailureDiagnostics.log(name, bytes, mappings, Environment.OBF);
-                } else if (name.equals("dev/minecraft/client/Minecraft")
-                        || name.equals("dev/minecraft/client/renderer/EntityRenderer")) {
+                } else if (name.equals("net/minecraft/client/Minecraft")
+                        || name.equals("net/minecraft/client/renderer/EntityRenderer")) {
                     AgentLog.log("Badlion inspection runtime target " + name);
                     AsmFailureDiagnostics.log(name, bytes, mappings, Environment.MCP);
                 }

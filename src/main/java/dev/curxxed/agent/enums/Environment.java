@@ -33,7 +33,7 @@ public enum Environment {
 
     public static Environment detectFromMinecraftClass(String className, byte[] classfileBuffer) {
         if ("ave".equals(className)) return OBF;
-        if (!"dev/minecraft/client/Minecraft".equals(className)) return detectRuntimeEnvironment();
+        if (!"net/minecraft/client/Minecraft".equals(className)) return detectRuntimeEnvironment();
 
         final boolean[] hasSrgStartGame = {false};
         final boolean[] hasMcpStartGame = {false};
@@ -61,9 +61,9 @@ public enum Environment {
     private static Environment detectFromResources() {
         final ClassLoader contextLoader = Thread.currentThread().getContextClassLoader();
         if (hasResource(contextLoader, "ave.class")) return OBF;
-        if (hasResource(contextLoader, "dev/minecraft/client/Minecraft.class")) {
+        if (hasResource(contextLoader, "net/minecraft/client/Minecraft.class")) {
             boolean isLunar = hasResource(contextLoader, "com/moonsworth/lunar/genesis/Genesis.class");
-            if (hasResource(contextLoader, "dev/minecraftforge/common/MinecraftForge.class") && !isLunar) {
+            if (hasResource(contextLoader, "net/minecraftforge/common/MinecraftForge.class") && !isLunar) {
                 return SRG;
             }
             return MCP;

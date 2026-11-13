@@ -77,7 +77,7 @@ public final class BadlionFinalStage {
             }
         }
         try {
-            if (type == null && resolveProtected && name.startsWith("dev/badlion/")) {
+            if (type == null && resolveProtected && name.startsWith("net/badlion/")) {
                 // Use Badlion's normal class loader, never initialize the class here.
                 type = Class.forName(name.replace('/', '.'), false, loader);
             }
@@ -200,7 +200,7 @@ public final class BadlionFinalStage {
         try {
             ClassReader reader = new ClassReader(bytes);
             remember(loader, name, reader);
-            if (name.startsWith("dev/badlion/")) return null;
+            if (name.startsWith("net/badlion/")) return null;
             for (Registration registration : TRANSFORMERS) {
                 // Per-mod guard: one mod's existing hook must not suppress another mod.
                 if (containsOwnedHooks(result, registration.owners)) continue;

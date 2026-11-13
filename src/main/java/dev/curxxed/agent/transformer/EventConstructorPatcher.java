@@ -15,7 +15,7 @@ import java.util.Set;
 public class EventConstructorPatcher implements ClassFileTransformer {
 
     // if it doesn't extend this (directly or indirectly) we don't touch it
-    private static final String FORGE_EVENT = "dev/minecraftforge/fml/common/eventhandler/Event";
+    private static final String FORGE_EVENT = "net/minecraftforge/fml/common/eventhandler/Event";
 
     private final Set<String> modClassNames;
 
@@ -68,7 +68,7 @@ public class EventConstructorPatcher implements ClassFileTransformer {
         // one level of indirection catches PlayerEvent, EntityEvent, etc.
         // forge event hierarchies are shallow in practice so this covers basically everything.
         // if you have a 3-level-deep custom event hierarchy that's your problem, not mine.
-        return superName.startsWith("dev/minecraftforge/");
+        return superName.startsWith("net/minecraftforge/");
     }
 
     private boolean hasNoArgsConstructor(ClassReader cr) {
