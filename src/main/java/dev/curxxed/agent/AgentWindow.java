@@ -111,6 +111,7 @@ public final class AgentWindow {
         page.add(Box.createVerticalStrut(12));
         page.add(left(footer(agent)));
         window.setContentPane(page);
+        window.setResizable(false);
         window.pack();
         window.setMinimumSize(window.getSize());
         window.setLocationRelativeTo(null);
