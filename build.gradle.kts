@@ -1,5 +1,8 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     java
+    kotlin("jvm") version "2.3.21"
     id("com.github.johnrengelman.shadow") version "8.1.1"
 }
 
@@ -9,6 +12,14 @@ version = "1.0.0"
 java {
     sourceCompatibility = JavaVersion.VERSION_1_8
     targetCompatibility = JavaVersion.VERSION_1_8
+}
+
+// Kotlin is only used for the setup window and the jar's entry point (src/main/kotlin).
+// Everything that runs inside the game stays Java and never touches the Kotlin stdlib.
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_1_8)
+    }
 }
 
 repositories {
@@ -39,6 +50,15 @@ tasks.shadowJar {
 
     // Relocate so we don't collide with other ASM versions
     relocate("org.objectweb.asm", "dev.curxxed.agent.asm")
+    relocate("kotlin", "dev.curxxed.agent.kotlin")
+    relocate("org.jetbrains.annotations", "dev.curxxed.agent.annotations")
+    relocate("org.intellij.lang.annotations", "dev.curxxed.agent.annotations.intellij")
+    exclude("META-INF/*.kotlin_module", "META-INF/versions/**/module-info.class", "module-info.class", "META-INF/maven/org.jetbrains/**")
+
+    // Drops the parts of the Kotlin stdlib the setup window doesn't use. ASM stays complete as before.
+    minimize {
+        exclude(dependency("org.ow2.asm:.*:.*"))
+    }
 
     manifest {
         attributes(
