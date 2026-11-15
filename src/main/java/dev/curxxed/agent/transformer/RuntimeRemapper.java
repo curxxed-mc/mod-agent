@@ -205,8 +205,8 @@ public class RuntimeRemapper implements ClassFileTransformer {
         }
 
         // Walk the runtime class hierarchy rooted at internalName and register every
-        // parent relationship into MappingRegistry.superClasses so that findMethod's
-        // while-loop chain walk can follow them.
+        // parent relationship into MappingRegistry.superClasses so that findMethod and
+        // findField can follow inherited members.
         //
         // Prefer observed/loaded hierarchy metadata for protected native clients.
         // Missing or non-class resources must not discard the transformed game class.
@@ -215,7 +215,11 @@ public class RuntimeRemapper implements ClassFileTransformer {
         private void seedSuperClassChain(String internalName) {
             if (internalName == null || !seededClasses.add(internalName)) return;
 
-            ClassInfo info = readClassInfo(internalName);
+            // Mods may use other names than the runtime, which only has its own class files
+            // (e.g. bew instead of net/minecraft/client/entity/EntityPlayerSP on vanilla).
+            final String runtimeName = mappings.mapClass(internalName, targetNamespace);
+            ClassInfo info = readClassInfo(runtimeName);
+            if (info == null && !runtimeName.equals(internalName)) info = readClassInfo(internalName);
             if (info == null) return;
 
             if (info.superName != null && !"java/lang/Object".equals(info.superName)) {
@@ -251,7 +255,8 @@ public class RuntimeRemapper implements ClassFileTransformer {
                 throw new IllegalArgumentException("Resource is not a class file");
             }
             ClassReader cr = new ClassReader(bytes);
-            if (!internalName.equals(cr.getClassName())) {
+            // Some loaders (Lunar) answer with the same class under another namespace's name, e.g. avn for FontRenderer.
+            if (!internalName.equals(cr.getClassName()) && !mappings.sameClass(internalName, cr.getClassName())) {
                 throw new IllegalArgumentException("Unexpected resource class: " + cr.getClassName());
             }
             return new ClassInfo(cr.getSuperName(), cr.getInterfaces());
