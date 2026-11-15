@@ -5,13 +5,16 @@ import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class MappingRegistry {
 
@@ -46,7 +49,9 @@ public class MappingRegistry {
     private final EnumMap<Namespace, Set<String>> ambiguousMethodsByOwnerName =
             new EnumMap<>(Namespace.class);
 
-    private final Map<String, String> superClasses = new HashMap<>();
+    // Superclass and interfaces of each seen class, keyed and valued by the same namespace's names.
+    // Concurrent since mod classes can be transformed on several threads.
+    private final Map<String, Set<String>> superClasses = new ConcurrentHashMap<>();
 
     // SRG func_/field_ names are globally unique identifiers — the same name always
     // resolves to the same target regardless of which class it's called on.
@@ -327,7 +332,7 @@ public class MappingRegistry {
         child = normalizeInternalName(child);
         parent = normalizeInternalName(parent);
 
-        superClasses.put(child, parent);
+        addParent(child, parent);
 
         ClassMapping childMapping = findClass(child);
         ClassMapping parentMapping = findClass(parent);
@@ -336,12 +341,38 @@ public class MappingRegistry {
 
             for (Namespace ns : Namespace.values()) {
 
-                superClasses.put(
+                addParent(
                         childMapping.name(ns),
                         parentMapping.name(ns)
                 );
             }
         }
+    }
+
+    private void addParent(String child, String parent) {
+        superClasses.computeIfAbsent(child, ignored -> ConcurrentHashMap.newKeySet()).add(parent);
+    }
+
+    /// The class itself, then every superclass and interface it was registered with, nearest first.
+    private List<String> hierarchy(String start) {
+        final List<String> result = new ArrayList<>();
+        final Set<String> seen = new HashSet<>();
+        final Deque<String> queue = new ArrayDeque<>();
+        queue.add(start);
+        while (!queue.isEmpty()) {
+            final String current = queue.poll();
+            if (!seen.add(current)) continue;
+            result.add(current);
+            final Set<String> parents = superClasses.get(current);
+            if (parents != null) queue.addAll(parents);
+        }
+        return result;
+    }
+
+    /// Whether both names belong to the same Minecraft class, in any namespace.
+    public boolean sameClass(String first, String second) {
+        final ClassMapping mapping = findClass(normalizeInternalName(first));
+        return mapping != null && mapping == findClass(normalizeInternalName(second));
     }
 
     public boolean hasClass(Namespace namespace, String internalName) {
@@ -720,7 +751,7 @@ public class MappingRegistry {
 
             for (Namespace namespace : Namespace.values()) {
 
-                String currentOwner =
+                String startOwner =
                         ownerMapping != null
                                 ? ownerMapping.name(namespace)
                                 : owner;
@@ -730,7 +761,7 @@ public class MappingRegistry {
                                 ? remapDescriptor(descriptor, namespace)
                                 : null;
 
-                while (currentOwner != null) {
+                for (String currentOwner : hierarchy(startOwner)) {
 
                     if (namespaceDesc != null) {
 
@@ -763,9 +794,6 @@ public class MappingRegistry {
                             || mapping.desc(namespace).equals(namespaceDesc))) {
                         return mapping;
                     }
-
-                    currentOwner =
-                            superClasses.get(currentOwner);
                 }
             }
         }
@@ -801,17 +829,20 @@ public class MappingRegistry {
                                 ? ownerMapping.name(namespace)
                                 : owner;
 
-                FieldMapping mapping =
-                        fieldsByKey.get(namespace)
-                                .get(
-                                        fieldKey(
-                                                namespaceOwner,
-                                                name
-                                        )
-                                );
+                // Fields are inherited too, e.g. EntityPlayerSP.posX is declared in Entity.
+                for (String currentOwner : hierarchy(namespaceOwner)) {
+                    FieldMapping mapping =
+                            fieldsByKey.get(namespace)
+                                    .get(
+                                            fieldKey(
+                                                    currentOwner,
+                                                    name
+                                            )
+                                    );
 
-                if (mapping != null) {
-                    return mapping;
+                    if (mapping != null) {
+                        return mapping;
+                    }
                 }
             }
         }

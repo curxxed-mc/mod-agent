@@ -20,6 +20,13 @@ dependencies {
     implementation("org.ow2.asm:asm:9.7")
     implementation("org.ow2.asm:asm-commons:9.7")
     compileOnly("org.spongepowered:mixin:0.8.7")
+
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 tasks.jar {
