@@ -1,10 +1,8 @@
 - Fix remapper, currently it remaps things it shouldn't in some cases.
-- Add a shutdown hook for removing lunar bake cache (so it doesn't crash if you remove jvm args)
-- Support injection on forge as well
-- Rename to mod-agent
-- Make sure BLC works with ASM
-- QOL: Add json entry for creating debug log
-- QOL: Support not setting mod paths and json path for compact jvm arg & json (look in current dir if unset)
+- Delete the Lunar bake cache on shutdown too, not just on startup (so the game doesn't crash after removing the JVM argument).
+- Support injection on Forge as well.
+- QOL: Add a json entry for enabling the debug log (currently the modagent.log.file system property).
+- QOL: Look for agent-mods.json and mod JARs next to the agent when the JVM argument doesn't give a path.
 
 Long term:
-- Mixin environment for vanilla & blc.. maybe
+- Mixin environment for vanilla & BLC.. maybe
