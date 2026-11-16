@@ -58,24 +58,10 @@ public class AgentBootstrap {
             BadlionCompatibilityInspection.start(inst);
             return;
         }
-        try {
-            Path cacheDir = Paths.get(System.getProperty("user.home"), ".lunarclient", "offline", "multiver", "cache");
-            if (Files.exists(cacheDir)) {
-                //noinspection resource
-                Files.walk(cacheDir)
-                        .filter(p -> p.getFileName().toString().equals("bake.zip"))
-                        .forEach(p -> {
-                            try {
-                                Files.delete(p);
-                                AgentLog.log("Deleted bake cache: " + p);
-                            } catch (IOException e) {
-                                AgentLog.log("Failed to delete bake cache: " + p + " -- " + e);
-                            }
-                        });
-            }
-        } catch (Exception e) {
-            AgentLog.log("Error clearing bake cache: " + e);
-        }
+
+        // Clear Lunar bake cache both on start & when quitting.
+        clearBakeCache();
+        Runtime.getRuntime().addShutdownHook(new Thread(AgentBootstrap::clearBakeCache, "agent-bake-cache-clear"));
 
         AgentLog.log("premain fired, config: " + args);
 
@@ -174,6 +160,28 @@ public class AgentBootstrap {
         } catch (IOException e) {
             AgentLog.log("Failed to create mixin pre-patch dir: " + e);
             return null;
+        }
+    }
+
+    /// Deletes Lunar's bake.zip class caches.
+    private static void clearBakeCache() {
+        try {
+            Path cacheDir = Paths.get(System.getProperty("user.home"), ".lunarclient", "offline", "multiver", "cache");
+            if (Files.exists(cacheDir)) {
+                //noinspection resource
+                Files.walk(cacheDir)
+                        .filter(p -> p.getFileName().toString().equals("bake.zip"))
+                        .forEach(p -> {
+                            try {
+                                Files.delete(p);
+                                AgentLog.log("Deleted bake cache: " + p);
+                            } catch (IOException e) {
+                                AgentLog.log("Failed to delete bake cache: " + p + " -- " + e);
+                            }
+                        });
+            }
+        } catch (Exception e) {
+            AgentLog.log("Error clearing bake cache: " + e);
         }
     }
 
