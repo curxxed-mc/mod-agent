@@ -21,13 +21,14 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-
+import java.util.Locale;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Remaps a fake mod class with the real mappings. The runtime's own class files come from a vanilla 1.8.9 jar,
- * set with -Dmodagent.test.vanillaJar or found in ~/.minecraft/versions/1.8.9. Skipped without one.
+ * set with -Dmodagent.test.vanillaJar or found in the launcher's versions/1.8.9 folder (%APPDATA%\.minecraft on
+ * Windows, ~/Library/Application Support/minecraft on macOS, ~/.minecraft elsewhere). Skipped without one.
  */
 class RuntimeRemapperTest {
 
@@ -44,8 +45,9 @@ class RuntimeRemapperTest {
 
     @BeforeAll
     static void load() throws Exception {
-        vanillaJar = new File(System.getProperty("modagent.test.vanillaJar",
-                Paths.get(System.getProperty("user.home"), ".minecraft", "versions", "1.8.9", "1.8.9.jar").toString()));
+        final String configured = System.getProperty("modagent.test.vanillaJar");
+        vanillaJar = configured != null ? new File(configured)
+                : minecraftDirectory().resolve("versions").resolve("1.8.9").resolve("1.8.9.jar").toFile();
         try (InputStream in = RuntimeRemapperTest.class.getResourceAsStream("/mappings/combined.csv")) {
             mappings = MappingRegistry.load(in);
         }
@@ -95,6 +97,18 @@ class RuntimeRemapperTest {
             }
         };
         check(refs, RuntimeRemapper.remapBytes(mod, mappings, Environment.MCP, Collections.singleton(MOD), runtime));
+    }
+
+    /// Where the official launcher keeps its files on this OS.
+    private static Path minecraftDirectory() {
+        final String home = System.getProperty("user.home");
+        final String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        if (os.startsWith("windows")) {
+            final String appData = System.getenv("APPDATA");
+            return appData != null ? Paths.get(appData, ".minecraft") : Paths.get(home, "AppData", "Roaming", ".minecraft");
+        }
+        if (os.startsWith("mac")) return Paths.get(home, "Library", "Application Support", "minecraft");
+        return Paths.get(home, ".minecraft");
     }
 
     private static void field(List<String[]> refs, String owner, String name, String desc, String expected) {
