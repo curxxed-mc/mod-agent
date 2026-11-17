@@ -3,15 +3,19 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     java
     kotlin("jvm") version "2.3.21"
-    id("com.github.johnrengelman.shadow") version "8.1.1"
+    id("com.gradleup.shadow") version "9.6.1"
 }
 
 group = "dev.curxxed"
 version = "1.0.0"
 
+// Gradle itself needs JDK 17+, but the jar runs on Java 8. Compile (and test) with a real JDK 8
+// so newer JDK methods can't slip in. --release 8 isn't an option: it hides sun.misc.Unsafe.
+// Gradle uses an installed JDK 8 or downloads one (see settings.gradle.kts).
 java {
-    sourceCompatibility = JavaVersion.VERSION_1_8
-    targetCompatibility = JavaVersion.VERSION_1_8
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(8))
+    }
 }
 
 // Kotlin is only used for the setup window and the jar's entry point (src/main/kotlin).
