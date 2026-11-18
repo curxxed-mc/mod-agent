@@ -1,4 +1,6 @@
-package dev.curxxed.agent;
+package dev.curxxed.agent.badlion;
+
+import dev.curxxed.agent.lunar.LunarSettings;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -91,7 +93,7 @@ public final class BadlionLauncherSetup {
         return previous;
     }
 
-    static Path detectRuntime() throws IOException {
+    public static Path detectRuntime() throws IOException {
         String home = System.getProperty("user.home");
         List<Path> roots = new ArrayList<>();
         roots.add(Paths.get(home, ".cache", "Badlion Client", "Data"));

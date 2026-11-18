@@ -1,4 +1,4 @@
-package dev.curxxed.agent;
+package dev.curxxed.agent.lunar;
 
 import java.io.File;
 import java.io.IOException;

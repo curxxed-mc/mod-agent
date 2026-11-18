@@ -1,7 +1,8 @@
 package dev.curxxed.agent.transformer;
 
+import dev.curxxed.agent.badlion.BadlionFinalStage;
+
 import dev.curxxed.agent.AgentLog;
-import dev.curxxed.agent.BadlionFinalStage;
 import dev.curxxed.agent.enums.Environment;
 import dev.curxxed.agent.mappings.MappingRegistry;
 import org.objectweb.asm.ClassReader;

@@ -1,4 +1,8 @@
-package dev.curxxed.agent;
+package dev.curxxed.agent.badlion;
+
+import dev.curxxed.agent.AgentBootstrap;
+import dev.curxxed.agent.AgentLog;
+import dev.curxxed.agent.AsmFailureDiagnostics;
 
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
@@ -7,8 +11,10 @@ import java.security.ProtectionDomain;
 import dev.curxxed.agent.enums.Environment;
 import dev.curxxed.agent.mappings.MappingRegistry;
 
-final class BadlionCompatibilityInspection {
-    static void start(Instrumentation instrumentation) {
+public final class BadlionCompatibilityInspection {
+    private BadlionCompatibilityInspection() {}
+
+    public static void start(Instrumentation instrumentation) {
         if (!BadlionBootstrapFallback.isBadlionLaunch(System.getProperty("sun.java.command", ""))) {
             AgentLog.log("Badlion inspection requires the Badlion launch entrypoint; no transformers registered.");
             return;

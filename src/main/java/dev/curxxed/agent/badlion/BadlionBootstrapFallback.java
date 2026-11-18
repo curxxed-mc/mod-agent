@@ -1,4 +1,7 @@
-package dev.curxxed.agent;
+package dev.curxxed.agent.badlion;
+
+import dev.curxxed.agent.AgentBootstrap;
+import dev.curxxed.agent.AgentLog;
 
 import dev.curxxed.agent.enums.Environment;
 import dev.curxxed.agent.mappings.MappingRegistry;
