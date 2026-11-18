@@ -1,5 +1,3 @@
-- Fix remapper, currently it remaps things it shouldn't in some cases.
-- Delete the Lunar bake cache on shutdown too, not just on startup (so the game doesn't crash after removing the JVM argument).
 - Support injection on Forge as well.
 - QOL: Add a json entry for enabling the debug log (currently the modagent.log.file system property).
 - QOL: Look for agent-mods.json and mod JARs next to the agent when the JVM argument doesn't give a path.
