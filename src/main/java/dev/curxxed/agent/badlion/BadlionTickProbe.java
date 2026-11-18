@@ -1,4 +1,6 @@
-package dev.curxxed.agent;
+package dev.curxxed.agent.badlion;
+
+import dev.curxxed.agent.AgentLog;
 
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
@@ -8,7 +10,7 @@ import org.objectweb.asm.*;
 
 /** A bounded, event-free probe of one existing method body; no class-shape changes. */
 public final class BadlionTickProbe {
-    private static final String OWNER = "dev/curxxed/dev/agent/BadlionTickProbe";
+    private static final String OWNER = BadlionTickProbe.class.getName().replace('.', '/');
     private static final AtomicLong TICKS = new AtomicLong();
     private static volatile Class<?> retransformationTarget;
     private static volatile boolean observing;

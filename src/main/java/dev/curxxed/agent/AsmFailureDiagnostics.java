@@ -11,7 +11,9 @@ import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 
-final class AsmFailureDiagnostics {
+public final class AsmFailureDiagnostics {
+    private AsmFailureDiagnostics() {}
+
     static List<String> describe(String className, byte[] bytes, MappingRegistry mappings, Environment environment) {
         List<String> report = new ArrayList<>();
         String minecraft = "net/minecraft/client/Minecraft";
@@ -56,7 +58,7 @@ final class AsmFailureDiagnostics {
         return report;
     }
 
-    static void log(String className, byte[] bytes, MappingRegistry mappings, Environment environment) {
+    public static void log(String className, byte[] bytes, MappingRegistry mappings, Environment environment) {
         try {
             for (String line : describe(className, bytes, mappings, environment)) AgentLog.log(line);
         } catch (RuntimeException failure) {

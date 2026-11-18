@@ -1,4 +1,6 @@
-package dev.curxxed.agent;
+package dev.curxxed.agent.badlion;
+
+import dev.curxxed.agent.AgentLog;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -6,8 +8,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import org.objectweb.asm.ClassReader;
 
-final class BadlionFrameResources extends ClassLoader {
-    BadlionFrameResources(ClassLoader gameLoader) {
+public final class BadlionFrameResources extends ClassLoader {
+    public BadlionFrameResources(ClassLoader gameLoader) {
         super(gameLoader);
     }
 

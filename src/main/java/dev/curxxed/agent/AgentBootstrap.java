@@ -1,5 +1,11 @@
 package dev.curxxed.agent;
 
+import dev.curxxed.agent.badlion.BadlionBootstrapFallback;
+import dev.curxxed.agent.badlion.BadlionCompatibilityInspection;
+import dev.curxxed.agent.badlion.BadlionFinalStage;
+import dev.curxxed.agent.badlion.BadlionFrameResources;
+import dev.curxxed.agent.badlion.BadlionTickProbe;
+
 import dev.curxxed.agent.config.Config;
 import dev.curxxed.agent.config.ModEntry;
 import dev.curxxed.agent.invoke.ModLifecycleInvoker;
@@ -706,7 +712,7 @@ public class AgentBootstrap {
         ModLifecycleInvoker.invokeLifecycle(instance, configDir, modLoader);
     }
 
-    static MappingRegistry loadMappings() {
+    public static MappingRegistry loadMappings() {
         String resource = "/mappings/combined.csv";
         try (InputStream is = AgentBootstrap.class.getResourceAsStream(resource)) {
             if (is == null) {

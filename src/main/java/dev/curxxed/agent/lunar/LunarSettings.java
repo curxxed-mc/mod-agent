@@ -1,4 +1,4 @@
-package dev.curxxed.agent;
+package dev.curxxed.agent.lunar;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

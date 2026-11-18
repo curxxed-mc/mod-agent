@@ -1,5 +1,7 @@
 package dev.curxxed.agent
 
+import dev.curxxed.agent.badlion.BadlionLauncherSetup
+import dev.curxxed.agent.lunar.LunarJvmArgument
 import java.awt.GraphicsEnvironment
 import java.io.File
 import kotlin.system.exitProcess

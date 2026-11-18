@@ -1,4 +1,6 @@
-package dev.curxxed.agent;
+package dev.curxxed.agent.badlion;
+
+import dev.curxxed.agent.AgentLog;
 
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
@@ -32,13 +34,13 @@ public final class BadlionFinalStage {
     static void register(ClassFileTransformer transformer) {
         register(transformer, java.util.Collections.emptySet());
     }
-    static void register(ClassFileTransformer transformer, java.util.Set<String> owners) {
+    public static void register(ClassFileTransformer transformer, java.util.Set<String> owners) {
         TRANSFORMERS.add(new Registration(transformer, owners));
     }
     public static boolean isInstalled() { return installed; }
     public static void setInstrumentation(Instrumentation value) { instrumentation = value; }
 
-    static boolean enabledForLaunch() {
+    public static boolean enabledForLaunch() {
         if (!BadlionBootstrapFallback.isBadlionLaunch(System.getProperty("sun.java.command", ""))) return false;
         String option = System.getProperty("modagent.badlion.finalStage", "on");
         return !option.equalsIgnoreCase("off") && !option.equalsIgnoreCase("false");
